@@ -40,8 +40,6 @@ namespace Sveto4
         private KsState state = new KsState();
         private bool busy;
         private bool polling;
-        private bool menuOpen;
-        private bool pendingMenuUpdate;
         private bool forceFullRefresh;
         private int generation;
         private int tick;
@@ -76,12 +74,8 @@ namespace Sveto4
                 new MenuItem("-"),
                 new MenuItem("Exit", (s, e) => ExitApp()),
             });
-            menu.Popup += (s, e) => menuOpen = true;
-            menu.Collapse += (s, e) =>
-            {
-                menuOpen = false;
-                if (pendingMenuUpdate) ApplyState();
-            };
+            // Menu content is built right before it is shown (the tray menu has no reliable "closed" event).
+            menu.Popup += (s, e) => UpdateMenu();
 
             tray.Icon = icons.Get(Yellow);
             tray.Text = "Sveto4: starting...";
@@ -230,15 +224,10 @@ namespace Sveto4
             if (busy) return;
             UpdateTooltip();
             AnimateTo(TargetColor());
+        }
 
-            // Rebuilding an open native menu is unreliable; postpone until it closes.
-            if (menuOpen)
-            {
-                pendingMenuUpdate = true;
-                return;
-            }
-            pendingMenuUpdate = false;
-
+        private void UpdateMenu()
+        {
             var on = state.Mode != KsMode.Off;
             miPartial.Visible = state.Mode == KsMode.Partial;
             miPartial.Text = "⚠ Partially on. Not blocked: " + state.NotBlocked;
