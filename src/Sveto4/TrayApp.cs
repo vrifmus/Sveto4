@@ -22,6 +22,8 @@ namespace Sveto4
         private const int PollIntervalMs = 3000;
         private const int FullRefreshEveryTicks = 10; // re-read rules every ~30 s
         private const int AnimSteps = 8;
+        /// <summary>Warning sign, right-aligned: native menus align text after a tab to the right edge.</summary>
+        private const string Warn = "\t⚠";
 
         private readonly NotifyIcon tray = new NotifyIcon();
         private readonly ContextMenu menu = new ContextMenu();
@@ -98,6 +100,8 @@ namespace Sveto4
             animTimer.Tick += (s, e) => OnAnimTick();
             pollTimer.Tick += (s, e) => OnPoll();
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            MenuTheme.Apply();
 
             Start(autoEnable);
         }
@@ -122,6 +126,7 @@ namespace Sveto4
         {
             // The firewall state is intentionally left as is: the kill switch must survive app exit.
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
             pollTimer.Stop();
             animTimer.Stop();
             tray.Visible = false;
@@ -140,6 +145,13 @@ namespace Sveto4
                 Log.Info("Resumed from sleep");
                 forceFullRefresh = true;
             }, null);
+        }
+
+        private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+        {
+            // Light/dark switch arrives as General; re-apply the menu theme on the UI thread.
+            if (e.Category == UserPreferenceCategory.General || e.Category == UserPreferenceCategory.Color)
+                ui.Post(_ => MenuTheme.Apply(), null);
         }
 
         // ---------- Actions and refresh ----------
@@ -173,8 +185,9 @@ namespace Sveto4
 
             try
             {
+                var watch = System.Diagnostics.Stopwatch.StartNew();
                 await Task.Run(action);
-                Log.Info(what);
+                Log.Info($"{what} ({watch.ElapsedMilliseconds} ms)");
             }
             catch (Exception ex)
             {
@@ -256,7 +269,7 @@ namespace Sveto4
             miBlockLeaks.Checked = state.BlockLeaks;
             miBlockLeaks.Enabled = state.RulesLoaded;
             miPartial.Visible = state.Mode == KsMode.Partial;
-            miPartial.Text = "Partially on. Not blocked: " + state.NotBlocked;
+            miPartial.Text = "Partially on. Not blocked: " + state.NotBlocked + Warn;
             miToggle.Text = state.Mode == KsMode.On ? "Turn OFF"
                           : state.Mode == KsMode.Partial ? "Turn ON (all profiles)"
                           : "Turn ON";
@@ -283,7 +296,7 @@ namespace Sveto4
             if (state.Leaks.Count > 0)
             {
                 miLeaks.Visible = true;
-                miLeaks.Text = $"Possible leaks ({state.Leaks.Count})";
+                miLeaks.Text = $"Possible leaks ({state.Leaks.Count})" + Warn;
                 AddLeakItems(state.Leaks);
                 miLeaks.MenuItems.Add(new MenuItem("These Windows rules allow traffic outside the VPN.") { Enabled = false });
                 miLeaks.MenuItems.Add(new MenuItem(state.BlockLeaks
@@ -326,9 +339,14 @@ namespace Sveto4
             foreach (var name in names)
             {
                 var iface = name;
-                miInterfaces.MenuItems.Add(new MenuItem(iface, (s, e) => OnInterfaceClick(iface))
+                var isSelected = selected.Contains(iface);
+                // Selected but absent or disconnected: grayed out with a warning sign, as in the legacy version.
+                // It can be cleared with "None".
+                var missing = isSelected && !state.Adapters.Any(a => a.IsUp && string.Equals(a.Name, iface, StringComparison.OrdinalIgnoreCase));
+                miInterfaces.MenuItems.Add(new MenuItem(missing ? iface + Warn : iface, (s, e) => OnInterfaceClick(iface))
                 {
-                    Checked = selected.Contains(iface),
+                    Checked = isSelected,
+                    Enabled = !missing,
                 });
             }
         }

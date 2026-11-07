@@ -18,10 +18,20 @@ namespace Sveto4.Tests
         public bool IsOutboundBlocked(int profile) => Blocked[profile];
         public void SetOutboundBlocked(int profile, bool block) => Blocked[profile] = block;
 
-        public List<RuleInfo> GetRules(string prefix) =>
-            Rules.Where(r => r.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                 .Select(r => new RuleInfo(r.Name, r.Enabled))
-                 .ToList();
+        /// <summary>Number of full passes over all rules (the slow operation in the real firewall).</summary>
+        public int Enumerations;
+
+        public List<RuleProps> GetAllRules()
+        {
+            Enumerations++;
+            return Rules.Select(r => new RuleProps
+                        {
+                            Name = r.Name, Enabled = r.Enabled, IsOutboundAllow = true,
+                            ApplicationName = r.ApplicationName, Protocol = 256,
+                        })
+                        .Concat(SystemRules.Select(Copy))
+                        .ToList();
+        }
 
         public bool Exists(string name) => Find(name) != null;
 
@@ -38,18 +48,22 @@ namespace Sveto4.Tests
         /// <summary>System outbound Allow rules (own KS rules are not mirrored here).</summary>
         public readonly List<RuleProps> SystemRules = new List<RuleProps>();
 
-        public List<RuleProps> GetOutboundAllowRules() =>
-            SystemRules.Select(r => new RuleProps
-            {
-                Name = r.Name, Enabled = r.Enabled, ApplicationName = r.ApplicationName,
-                ServiceName = r.ServiceName, Protocol = r.Protocol, RemotePorts = r.RemotePorts,
-            }).ToList();
-
-        public void SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled)
+        public List<RuleProps> SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled,
+                                                            Action<List<RuleProps>> beforeChange = null)
         {
-            foreach (var r in SystemRules.Where(match).ToList())
-                r.Enabled = enabled;
+            Enumerations++;
+            var matches = SystemRules.Where(r => match(Copy(r))).ToList();
+            var changed = matches.Select(Copy).ToList();
+            beforeChange?.Invoke(changed);
+            foreach (var r in matches) r.Enabled = enabled;
+            return changed;
         }
+
+        private static RuleProps Copy(RuleProps r) => new RuleProps
+        {
+            Name = r.Name, Enabled = r.Enabled, IsOutboundAllow = true, ApplicationName = r.ApplicationName,
+            ServiceName = r.ServiceName, Protocol = r.Protocol, RemotePorts = r.RemotePorts,
+        };
     }
 
     internal sealed class FakeStore : IStateStore

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 namespace Sveto4
@@ -34,6 +35,8 @@ namespace Sveto4
     {
         public string Name;
         public bool Enabled;
+        /// <summary>Outbound Allow rule; the remaining fields are filled only for such rules.</summary>
+        public bool IsOutboundAllow;
         public string ApplicationName;
         public string ServiceName;
         /// <summary>IANA protocol number: 6 = TCP, 17 = UDP, 41 = IPv6, 256 = any.</summary>
@@ -47,18 +50,21 @@ namespace Sveto4
         bool IsFirewallEnabled(int profile);
         bool IsOutboundBlocked(int profile);
         void SetOutboundBlocked(int profile, bool block);
-        /// <summary>Returns all rules whose name starts with the prefix (case-insensitive).</summary>
-        List<RuleInfo> GetRules(string prefix);
+        /// <summary>All rules in one pass (enumerating ~600 COM rules is the slowest operation).</summary>
+        List<RuleProps> GetAllRules();
         bool Exists(string name);
         /// <summary>Enables or disables every rule with this exact name.</summary>
         void SetEnabled(string name, bool enabled);
         /// <summary>Removes every rule whose name matches the predicate.</summary>
         void RemoveWhere(Func<string, bool> match);
         void AddOutboundAllow(RuleSpec spec);
-        /// <summary>All outbound Allow rules, enabled or not.</summary>
-        List<RuleProps> GetOutboundAllowRules();
-        /// <summary>Enables or disables every outbound Allow rule matching the predicate.</summary>
-        void SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled);
+        /// <summary>
+        /// Enables or disables every outbound Allow rule matching the predicate, in one pass.
+        /// <paramref name="beforeChange"/> receives the matches before anything is changed.
+        /// </summary>
+        /// <returns>The rules that were changed.</returns>
+        List<RuleProps> SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled,
+                                                     Action<List<RuleProps>> beforeChange = null);
     }
 
     internal static class Firewall
@@ -94,16 +100,12 @@ namespace Sveto4
         public void SetOutboundBlocked(int profile, bool block) =>
             SetIndexed(NewPolicy(), "DefaultOutboundAction", profile, block ? ActionBlock : ActionAllow);
 
-        public List<RuleInfo> GetRules(string prefix)
+        public List<RuleProps> GetAllRules()
         {
-            var result = new List<RuleInfo>();
+            var result = new List<RuleProps>();
             dynamic policy = NewPolicy();
             foreach (dynamic rule in policy.Rules)
-            {
-                string name = rule.Name;
-                if (name != null && name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    result.Add(new RuleInfo(name, (bool)rule.Enabled));
-            }
+                result.Add(ToProps(rule));
             return result;
         }
 
@@ -171,41 +173,36 @@ namespace Sveto4
             policy.Rules.Add(rule);
         }
 
-        public List<RuleProps> GetOutboundAllowRules()
+        public List<RuleProps> SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled,
+                                                            Action<List<RuleProps>> beforeChange = null)
         {
-            var result = new List<RuleProps>();
+            var matches = new List<(dynamic Rule, RuleProps Props)>();
             dynamic policy = NewPolicy();
             foreach (dynamic rule in policy.Rules)
             {
-                var props = ToOutboundAllowProps(rule);
-                if (props != null) result.Add(props);
+                RuleProps props = ToProps(rule);
+                if (props.IsOutboundAllow && match(props)) matches.Add((rule, props));
             }
-            return result;
+
+            var changed = matches.Select(m => m.Props).ToList();
+            beforeChange?.Invoke(changed);
+            foreach (var m in matches) m.Rule.Enabled = enabled;
+            return changed;
         }
 
-        public void SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled)
+        /// <summary>Reads rule properties; details only for outbound Allow rules (fewer COM calls).</summary>
+        private static RuleProps ToProps(dynamic rule)
         {
-            dynamic policy = NewPolicy();
-            foreach (dynamic rule in policy.Rules)
+            var props = new RuleProps { Name = rule.Name, Enabled = (bool)rule.Enabled };
+            props.IsOutboundAllow = (int)rule.Direction == DirectionOut && (int)rule.Action == ActionAllow;
+            if (props.IsOutboundAllow)
             {
-                RuleProps props = ToOutboundAllowProps(rule);
-                if (props != null && match(props)) rule.Enabled = enabled;
+                props.ApplicationName = rule.ApplicationName;
+                props.ServiceName = rule.ServiceName;
+                props.Protocol = (int)rule.Protocol;
+                props.RemotePorts = rule.RemotePorts;
             }
-        }
-
-        /// <summary>Returns properties of an outbound Allow rule, or null for other rules.</summary>
-        private static RuleProps ToOutboundAllowProps(dynamic rule)
-        {
-            if ((int)rule.Direction != DirectionOut || (int)rule.Action != ActionAllow) return null;
-            return new RuleProps
-            {
-                Name = rule.Name,
-                Enabled = (bool)rule.Enabled,
-                ApplicationName = rule.ApplicationName,
-                ServiceName = rule.ServiceName,
-                Protocol = (int)rule.Protocol,
-                RemotePorts = rule.RemotePorts,
-            };
+            return props;
         }
 
         private static object NewPolicy() =>

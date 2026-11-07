@@ -109,6 +109,45 @@ namespace Sveto4.Tests
         }
 
         [Fact]
+        public void TurnOnAndOff_PassOverRulesOnceEach()
+        {
+            var ks = Create();
+            ks.SetMode(true);
+            Assert.Equal(1, fw.Enumerations);
+
+            ks.SetMode(false);
+            Assert.Equal(2, fw.Enumerations);
+        }
+
+        [Fact]
+        public void ReadRules_PassesOverRulesOnce()
+        {
+            Create().ReadRules(new KsState());
+            Assert.Equal(1, fw.Enumerations);
+        }
+
+        [Fact]
+        public void BlockSystemLeaks_SavesListBeforeDisabling()
+        {
+            var savedWhileEnabled = false;
+            var store2 = new RecordingStore(() => savedWhileEnabled = dns.Enabled);
+            new KillSwitch(fw, () => new ProcessEntry[0], p => true, store2).SetMode(true);
+
+            Assert.True(savedWhileEnabled);
+            Assert.False(dns.Enabled);
+        }
+
+        private sealed class RecordingStore : IStateStore
+        {
+            private readonly System.Action onSave;
+            private List<LeakInfo> disabled = new List<LeakInfo>();
+            public RecordingStore(System.Action onSave) => this.onSave = onSave;
+            public List<LeakInfo> LoadDisabledRules() => disabled.ToList();
+            public void SaveDisabledRules(List<LeakInfo> rules) { onSave(); disabled = rules.ToList(); }
+            public bool BlockSystemLeaks { get; set; } = true;
+        }
+
+        [Fact]
         public void ReadRules_ReportsOpenAndDisabledLeaks()
         {
             var ks = Create();

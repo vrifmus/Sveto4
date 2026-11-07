@@ -293,8 +293,11 @@ namespace Sveto4
 
         public void ReadRules(KsState s)
         {
-            ApplyRules(s, firewall.GetRules(Prefix));
-            s.Leaks = FindLeaks(firewall.GetOutboundAllowRules().Where(r => r.Enabled));
+            var all = firewall.GetAllRules();
+            ApplyRules(s, all.Where(r => r.Name != null && r.Name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+                             .Select(r => new RuleInfo(r.Name, r.Enabled))
+                             .ToList());
+            s.Leaks = FindLeaks(all.Where(r => r.IsOutboundAllow && r.Enabled));
             s.DisabledLeaks = store.LoadDisabledRules();
             s.BlockLeaks = store.BlockSystemLeaks;
         }
@@ -337,18 +340,19 @@ namespace Sveto4
         /// <summary>Disables enabled leak rules and remembers them for restoring.</summary>
         private void BlockSystemLeaks()
         {
-            var open = FindLeaks(firewall.GetOutboundAllowRules().Where(r => r.Enabled));
-            if (open.Count == 0) return;
-
-            // Save first: if disabling fails halfway, restoring still knows every candidate.
-            var records = store.LoadDisabledRules();
-            foreach (var leak in open)
-                if (!records.Any(r => r.Kind == leak.Kind && r.RuleName == leak.RuleName))
-                    records.Add(leak);
-            store.SaveDisabledRules(records);
-
-            firewall.SetOutboundAllowEnabledWhere(r => r.Enabled && ClassifyLeak(r) != null, false);
-            Log.Info("Disabled system rules: " + string.Join("; ", open.Select(l => l.RuleName)));
+            // One pass over the rules. The list is saved before anything is disabled,
+            // so restoring still knows every rule if disabling fails halfway.
+            var changed = firewall.SetOutboundAllowEnabledWhere(r => r.Enabled && ClassifyLeak(r) != null, false, matches =>
+            {
+                if (matches.Count == 0) return;
+                var records = store.LoadDisabledRules();
+                foreach (var leak in FindLeaks(matches))
+                    if (!records.Any(r => r.Kind == leak.Kind && r.RuleName == leak.RuleName))
+                        records.Add(leak);
+                store.SaveDisabledRules(records);
+            });
+            if (changed.Count > 0)
+                Log.Info("Disabled system rules: " + string.Join("; ", changed.Select(r => r.Name)));
         }
 
         /// <summary>Re-enables only the rules this app disabled.</summary>
