@@ -90,7 +90,10 @@ namespace Sveto4
         public List<RuleInfo> Rules = new List<RuleInfo>();
         public HashSet<string> Interfaces = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public bool Lan;
-        public bool Nat;
+        /// <summary>"Allow WSL": Hyper-V firewall rule for WSL is enabled.</summary>
+        public bool Wsl;
+        /// <summary>WSL is installed and the Hyper-V firewall is available.</summary>
+        public bool WslAvailable;
         public List<AdapterInfo> Adapters = new List<AdapterInfo>();
         /// <summary>Enabled system rules that let traffic bypass the kill switch.</summary>
         public List<LeakInfo> Leaks = new List<LeakInfo>();
@@ -117,7 +120,8 @@ namespace Sveto4
             Rules = new List<RuleInfo>(Rules),
             Interfaces = new HashSet<string>(Interfaces, StringComparer.OrdinalIgnoreCase),
             Lan = Lan,
-            Nat = Nat,
+            Wsl = Wsl,
+            WslAvailable = WslAvailable,
             Adapters = Adapters,
             Leaks = new List<LeakInfo>(Leaks),
             DisabledLeaks = new List<LeakInfo>(DisabledLeaks),
@@ -135,7 +139,8 @@ namespace Sveto4
             Rules = other.Rules;
             Interfaces = other.Interfaces;
             Lan = other.Lan;
-            Nat = other.Nat;
+            Wsl = other.Wsl;
+            WslAvailable = other.WslAvailable;
         }
     }
 
@@ -150,7 +155,13 @@ namespace Sveto4
         public const string AllowPrefix = Prefix + "Allow-";
         public const string AppPrefix = Prefix + "App-";
         public const string LanPrefix = Prefix + "LAN-Allow-";
-        public const string NatRule = Prefix + "NAT-Allow";
+        /// <summary>Hyper-V firewall rule that lets WSL out (then host rules decide: only via the VPN adapter).</summary>
+        public const string WslRule = Prefix + "WSL-Allow";
+        /// <summary>
+        /// Legacy "Allow NAT (WSL)": allowed all traffic of the System process on any adapter,
+        /// i.e. past the VPN. Replaced by <see cref="WslRule"/> and removed on startup.
+        /// </summary>
+        public const string LegacyNatRule = Prefix + "NAT-Allow";
 
         // Rule name suffix (CIDR, as in the legacy version) -> firewall address.
         public static readonly IReadOnlyDictionary<string, string> LanSubnets = new Dictionary<string, string>
@@ -170,16 +181,19 @@ namespace Sveto4
         private readonly IFirewall firewall;
         private readonly ClientEnvironment env;
         private readonly IStateStore store;
+        private readonly IHyperVFirewall hyperV;
 
-        public KillSwitch(IFirewall firewall, ClientEnvironment env, IStateStore store)
+        public KillSwitch(IFirewall firewall, ClientEnvironment env, IStateStore store, IHyperVFirewall hyperV = null)
         {
             this.firewall = firewall;
             this.env = env;
             this.store = store;
+            this.hyperV = hyperV ?? new NoHyperVFirewall();
         }
 
         public static KillSwitch CreateDefault() =>
-            new KillSwitch(new ComFirewall(), ClientProfiles.CreateDefaultEnvironment(GetWmiProcesses), new FileStateStore());
+            new KillSwitch(new ComFirewall(), ClientProfiles.CreateDefaultEnvironment(GetWmiProcesses), new FileStateStore(),
+                           new WmiHyperVFirewall());
 
         // ---------- Pure logic ----------
 
@@ -206,7 +220,7 @@ namespace Sveto4
                      .Select(r => r.Name.Substring(AllowPrefix.Length)),
                 StringComparer.OrdinalIgnoreCase);
             s.Lan = rules.Any(r => r.Enabled && r.Name.StartsWith(LanPrefix, StringComparison.OrdinalIgnoreCase));
-            s.Nat = rules.Any(r => r.Enabled && string.Equals(r.Name, NatRule, StringComparison.OrdinalIgnoreCase));
+            s.Wsl = rules.Any(r => r.Enabled && string.Equals(r.Name, WslRule, StringComparison.OrdinalIgnoreCase));
             s.RulesLoaded = true;
         }
 
@@ -238,7 +252,7 @@ namespace Sveto4
                 "Sveto4",
                 "Kill switch: " + mode,
                 "LAN: " + OnOff(s.Lan),
-                "NAT (WSL): " + OnOff(s.Nat),
+                "WSL: " + OnOff(s.Wsl),
                 "VPN clients: " + (s.Clients.Any(c => c.Enabled)
                     ? string.Join(", ", s.Clients.Where(c => c.Enabled).Select(c => c.Profile.Name))
                     : "none"),
@@ -287,11 +301,26 @@ namespace Sveto4
             return n;
         }
 
-        public static KsState PredictNat(KsState s, bool on)
+        public static KsState PredictWsl(KsState s, bool on)
         {
             var n = s.Clone();
-            n.Nat = on;
-            SetRule(n, NatRule, on);
+            n.Wsl = on;
+            SetRule(n, WslRule, on);
+            return n;
+        }
+
+        /// <summary>The legacy rule is present and has to be replaced.</summary>
+        public static bool NeedsNatMigration(KsState s) =>
+            s.Rules.Any(r => string.Equals(r.Name, LegacyNatRule, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>An enabled legacy rule becomes "Allow WSL" (if WSL is available); the legacy rule is removed.</summary>
+        public static bool NatMigrationEnablesWsl(KsState s) =>
+            s.WslAvailable && s.Rules.Any(r => r.Enabled && string.Equals(r.Name, LegacyNatRule, StringComparison.OrdinalIgnoreCase));
+
+        public static KsState PredictNatMigration(KsState s)
+        {
+            var n = NatMigrationEnablesWsl(s) ? PredictWsl(s, true) : s.Clone();
+            RemoveRules(n, r => string.Equals(r, LegacyNatRule, StringComparison.OrdinalIgnoreCase));
             return n;
         }
 
@@ -350,7 +379,7 @@ namespace Sveto4
         {
             var n = PredictClear(PredictMode(s, false));
             n.Lan = false;
-            n.Nat = false;
+            n.Wsl = false;
             n.Rules = new List<RuleInfo>();
             return n;
         }
@@ -472,13 +501,36 @@ namespace Sveto4
             var all = firewall.GetAllRules();
             ApplyRules(s, all.Where(r => r.Name != null && r.Name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
                              .Select(r => new RuleInfo(r.Name, r.Enabled))
+                             .Concat(ReadHyperVRules())
                              .ToList());
+            s.WslAvailable = SafeHyperV(() => hyperV.IsWslAvailable(), false);
             s.Leaks = FindLeaks(all.Where(r => r.IsOutboundAllow && r.Enabled));
             s.DisabledLeaks = store.LoadDisabledRules();
             s.BlockLeaks = store.BlockSystemLeaks;
             s.Clients = ClientProfiles.All
                 .Select(p => new ClientStatus(p, IsClientEnabled(p, s.Rules), ClientProfiles.ResolveInstallDir(p, env)))
                 .ToList();
+        }
+
+        /// <summary>Own Hyper-V firewall rules, shown together with the host rules.</summary>
+        private IEnumerable<RuleInfo> ReadHyperVRules()
+        {
+            var wsl = SafeHyperV(() => hyperV.GetRuleEnabled(WslRule), null);
+            if (wsl != null) yield return new RuleInfo(WslRule, wsl.Value);
+        }
+
+        /// <summary>The Hyper-V firewall is optional: a failure there must not break reading the main state.</summary>
+        private static T SafeHyperV<T>(Func<T> read, T fallback)
+        {
+            try
+            {
+                return read();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Hyper-V firewall");
+                return fallback;
+            }
         }
 
         /// <summary>Stored setting; before it is first set, a client counts as enabled if its rules exist (migration).</summary>
@@ -554,10 +606,18 @@ namespace Sveto4
             }
         }
 
-        public void SetNat(bool on)
+        public void SetWsl(bool on)
         {
-            if (firewall.Exists(NatRule)) firewall.SetEnabled(NatRule, on);
-            else firewall.AddOutboundAllow(new RuleSpec { Name = NatRule, Enabled = on, ApplicationName = "System" });
+            if (on || hyperV.GetRuleEnabled(WslRule) != null) hyperV.SetWslAllow(WslRule, on);
+        }
+
+        /// <summary>Replaces the legacy "Allow NAT (WSL)" rule (System process on any adapter) with <see cref="WslRule"/>.</summary>
+        public void MigrateNatRule(KsState s)
+        {
+            if (NatMigrationEnablesWsl(s)) SetWsl(true);
+            firewall.RemoveWhere(n => string.Equals(n, LegacyNatRule, StringComparison.OrdinalIgnoreCase));
+            Log.Info($"Removed legacy rule {LegacyNatRule} (allowed System traffic past the VPN)" +
+                     (NatMigrationEnablesWsl(s) ? "; enabled Allow WSL instead" : ""));
         }
 
         public void SelectInterface(string iface)
@@ -586,6 +646,14 @@ namespace Sveto4
             SetMode(false);
             foreach (var profile in ClientProfiles.All) store.SetClientEnabled(profile.Id, false);
             firewall.RemoveWhere(n => n.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase));
+            try
+            {
+                hyperV.Remove(WslRule);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "remove " + WslRule);
+            }
         }
 
         // ---------- VPN client profiles ----------

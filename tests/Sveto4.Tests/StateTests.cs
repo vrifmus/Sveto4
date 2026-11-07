@@ -45,7 +45,7 @@ namespace Sveto4.Tests
         }
 
         [Fact]
-        public void ApplyRules_DerivesInterfacesLanNat()
+        public void ApplyRules_DerivesInterfacesLanWsl()
         {
             var s = new KsState();
             KillSwitch.ApplyRules(s, new List<RuleInfo>
@@ -54,7 +54,7 @@ namespace Sveto4.Tests
                 new RuleInfo("KS-Allow-happ-xray", true),
                 new RuleInfo("KS-Allow-Ethernet", false),
                 new RuleInfo("KS-LAN-Allow-10.0.0.0/8", true),
-                new RuleInfo("KS-NAT-Allow", false),
+                new RuleInfo("KS-WSL-Allow", false),
                 new RuleInfo("KS-App-happ-xray", true),
             });
 
@@ -62,7 +62,7 @@ namespace Sveto4.Tests
             Assert.Equal(new HashSet<string> { "Wi-Fi", "happ-xray" }, s.Interfaces);
             Assert.Contains("WI-FI", s.Interfaces); // case-insensitive, like interface aliases
             Assert.True(s.Lan);
-            Assert.False(s.Nat);
+            Assert.False(s.Wsl);
         }
 
         [Fact]
@@ -72,7 +72,7 @@ namespace Sveto4.Tests
             KillSwitch.ApplyRules(s, new List<RuleInfo>());
             Assert.Empty(s.Interfaces);
             Assert.False(s.Lan);
-            Assert.False(s.Nat);
+            Assert.False(s.Wsl);
         }
     }
 }

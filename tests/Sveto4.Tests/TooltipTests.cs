@@ -12,13 +12,13 @@ namespace Sveto4.Tests
         [Fact]
         public void FullState()
         {
-            var s = new KsState { Mode = KsMode.On, Lan = true, Nat = false, DisabledLeaks = Leaks(4) };
+            var s = new KsState { Mode = KsMode.On, Lan = true, DisabledLeaks = Leaks(4) };
             s.Clients.Add(new ClientStatus(ClientProfiles.Happ, true, @"C:\Happ"));
             s.Interfaces.Add("Wi-Fi");
             s.Interfaces.Add("happ-xray");
 
             Assert.Equal(
-                "Sveto4\nKill switch: ON\nLAN: ON\nNAT (WSL): OFF\nVPN clients: Happ\nBlock system leaks: ON (4)\nInterfaces: happ-xray, Wi-Fi",
+                "Sveto4\nKill switch: ON\nLAN: ON\nWSL: OFF\nVPN clients: Happ\nBlock system leaks: ON (4)\nInterfaces: happ-xray, Wi-Fi",
                 KillSwitch.FormatTooltip(s, 127));
         }
 
@@ -27,7 +27,7 @@ namespace Sveto4.Tests
         {
             var s = new KsState { Mode = KsMode.Off };
             Assert.Equal(
-                "Sveto4\nKill switch: OFF\nLAN: OFF\nNAT (WSL): OFF\nVPN clients: none\nBlock system leaks: ON\nInterfaces: none",
+                "Sveto4\nKill switch: OFF\nLAN: OFF\nWSL: OFF\nVPN clients: none\nBlock system leaks: ON\nInterfaces: none",
                 KillSwitch.FormatTooltip(s, 127));
         }
 

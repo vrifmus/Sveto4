@@ -36,7 +36,7 @@ namespace Sveto4
         private readonly MenuItem miOff = new MenuItem("Turn OFF (all profiles)") { Visible = false };
         private readonly MenuItem miLeaks = new MenuItem { Visible = false };
         private readonly MenuItem miLan = new MenuItem("Allow LAN");
-        private readonly MenuItem miNat = new MenuItem("Allow NAT (WSL)");
+        private readonly MenuItem miWsl = new MenuItem("Allow WSL");
         private readonly MenuItem miBlockLeaks = new MenuItem("Block system leaks");
         private readonly MenuItem miClients = new MenuItem("VPN clients");
         private readonly MenuItem miInterfaces = new MenuItem("Interfaces");
@@ -58,6 +58,7 @@ namespace Sveto4
         private int generation;
         private int tick;
         private DateTime lastReconcile = DateTime.MinValue;
+        private DateTime lastMigration = DateTime.MinValue;
         private DateTime lastSync = DateTime.MinValue;
         private string lastSyncSignature;
         private readonly System.Windows.Forms.Timer quickPollTimer = new System.Windows.Forms.Timer { Interval = 300 };
@@ -80,10 +81,10 @@ namespace Sveto4
                 var on = !state.Lan;
                 Run("LAN " + on, () => ks.SetLan(on), st => KillSwitch.PredictLan(st, on));
             };
-            miNat.Click += (s, e) =>
+            miWsl.Click += (s, e) =>
             {
-                var on = !state.Nat;
-                Run("NAT " + on, () => ks.SetNat(on), st => KillSwitch.PredictNat(st, on));
+                var on = !state.Wsl;
+                Run("WSL " + on, () => ks.SetWsl(on), st => KillSwitch.PredictWsl(st, on));
             };
             miBlockLeaks.Click += (s, e) =>
             {
@@ -101,7 +102,7 @@ namespace Sveto4
                 miOff,
                 new MenuItem("-"),
                 miLan,
-                miNat,
+                miWsl,
                 miClients,
                 miInterfaces,
                 miRules,
@@ -259,6 +260,16 @@ namespace Sveto4
             if (busy) return;
             ApplyState();
 
+            // Legacy "Allow NAT (WSL)" let System traffic past the VPN: replace it with the Hyper-V rule.
+            if (state.RulesLoaded && KillSwitch.NeedsNatMigration(state)
+                && DateTime.UtcNow - lastMigration > TimeSpan.FromMinutes(5))
+            {
+                lastMigration = DateTime.UtcNow;
+                var snapshot = state;
+                Run("Migrate NAT rule", () => ks.MigrateNatRule(snapshot), KillSwitch.PredictNatMigration);
+                return;
+            }
+
             // VPN client profiles: allow new tunnel adapters (e.g. after a core switch), drop vanished ones.
             // The same plan is not retried more often than every 30 s if it keeps failing.
             if (state.RulesLoaded && KillSwitch.NeedsClientSync(state))
@@ -410,8 +421,10 @@ namespace Sveto4
 
             miLan.Checked = state.Lan;
             miLan.Enabled = on;
-            miNat.Checked = state.Nat;
-            miNat.Enabled = on;
+            miWsl.Checked = state.Wsl;
+            // Kept clickable while on, so the rule can be turned off even if WSL was uninstalled.
+            miWsl.Enabled = on && (state.WslAvailable || state.Wsl);
+            miWsl.Text = "Allow WSL" + (state.WslAvailable || !state.RulesLoaded ? "" : "\tnot installed");
             miInterfaces.Enabled = on;
             miClients.Enabled = on;
             miRules.Enabled = on;

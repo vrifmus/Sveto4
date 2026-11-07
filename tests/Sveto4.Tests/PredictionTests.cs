@@ -13,13 +13,14 @@ namespace Sveto4.Tests
     {
         private readonly FakeFirewall fw = new FakeFirewall();
         private readonly FakeStore store = new FakeStore();
+        private readonly FakeHyperV hyperV = new FakeHyperV();
         private readonly KillSwitch ks;
 
         public PredictionTests()
         {
             fw.SystemRules.Add(LeakTests.Dns());
             fw.SystemRules.Add(LeakTests.Teredo);
-            ks = new KillSwitch(fw, TestEnv.Create(files: TestEnv.HappFiles, adapters: adapters), store);
+            ks = new KillSwitch(fw, TestEnv.Create(files: TestEnv.HappFiles, adapters: adapters), store, hyperV);
         }
 
         private readonly List<AdapterInfo> adapters = new List<AdapterInfo>
@@ -47,7 +48,7 @@ namespace Sveto4.Tests
 
             Assert.Equal(actual.Mode, predicted.Mode);
             Assert.Equal(actual.Lan, predicted.Lan);
-            Assert.Equal(actual.Nat, predicted.Nat);
+            Assert.Equal(actual.Wsl, predicted.Wsl);
             Assert.Equal(actual.BlockLeaks, predicted.BlockLeaks);
             Assert.Equal(Sorted(actual.Interfaces), Sorted(predicted.Interfaces));
             Assert.Equal(Sorted(actual.Leaks.Select(l => l.RuleName)), Sorted(predicted.Leaks.Select(l => l.RuleName)));
@@ -110,10 +111,20 @@ namespace Sveto4.Tests
         }
 
         [Fact]
-        public void NatOnAndOff()
+        public void WslOnAndOff()
         {
-            Check(() => ks.SetNat(true), s => KillSwitch.PredictNat(s, true));
-            Check(() => ks.SetNat(false), s => KillSwitch.PredictNat(s, false));
+            Check(() => ks.SetWsl(true), s => KillSwitch.PredictWsl(s, true));
+            Check(() => ks.SetWsl(false), s => KillSwitch.PredictWsl(s, false));
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void NatMigration(bool legacyEnabled)
+        {
+            fw.Rules.Add(new RuleSpec { Name = "KS-NAT-Allow", ApplicationName = "System", Enabled = legacyEnabled });
+            var snapshot = Read();
+            Check(() => ks.MigrateNatRule(snapshot), KillSwitch.PredictNatMigration);
         }
 
         [Fact]
@@ -153,7 +164,7 @@ namespace Sveto4.Tests
             ks.SetMode(true);
             ks.SelectInterface("happ-xray");
             ks.SetLan(true);
-            ks.SetNat(true);
+            ks.SetWsl(true);
             Check(() => ks.ResetAll(), KillSwitch.PredictReset);
         }
 

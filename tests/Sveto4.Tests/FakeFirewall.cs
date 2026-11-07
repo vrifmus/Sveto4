@@ -4,6 +4,22 @@ using System.Linq;
 
 namespace Sveto4.Tests
 {
+    /// <summary>In-memory Hyper-V firewall: never touches the system.</summary>
+    internal sealed class FakeHyperV : IHyperVFirewall
+    {
+        public bool Available = true;
+        public readonly Dictionary<string, bool> Rules = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        public bool IsWslAvailable() => Available;
+        public bool? GetRuleEnabled(string name) => Rules.TryGetValue(name, out var on) ? on : (bool?)null;
+        public void SetWslAllow(string name, bool enabled)
+        {
+            if (!Available) throw new InvalidOperationException("no WSL");
+            Rules[name] = enabled;
+        }
+        public void Remove(string name) => Rules.Remove(name);
+    }
+
     /// <summary>In-memory firewall: records state, never touches the system.</summary>
     internal sealed class FakeFirewall : IFirewall
     {

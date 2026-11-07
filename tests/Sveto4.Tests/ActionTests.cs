@@ -6,8 +6,17 @@ namespace Sveto4.Tests
     public class ActionTests
     {
         private readonly FakeFirewall fw = new FakeFirewall();
+        private readonly FakeHyperV hyperV = new FakeHyperV();
 
-        private KillSwitch Create() => new KillSwitch(fw, TestEnv.Create(), new FakeStore());
+        private KillSwitch Create() => new KillSwitch(fw, TestEnv.Create(), new FakeStore(), hyperV);
+
+        private KsState Read(KillSwitch ks)
+        {
+            var s = new KsState();
+            ks.ReadProfiles(s);
+            ks.ReadRules(s);
+            return s;
+        }
 
         private string[] RuleNames() => fw.Rules.Select(r => r.Name).OrderBy(n => n).ToArray();
 
@@ -71,26 +80,78 @@ namespace Sveto4.Tests
         }
 
         [Fact]
-        public void SetNat_AllowsSystemProcess()
+        public void SetWsl_HyperVRuleOnly_NoSystemProcessRule()
         {
-            Create().SetNat(true);
+            var ks = Create();
+            ks.SetWsl(true);
 
-            var rule = Assert.Single(fw.Rules);
-            Assert.Equal("KS-NAT-Allow", rule.Name);
-            Assert.Equal("System", rule.ApplicationName);
+            Assert.Empty(fw.Rules);
+            Assert.True(hyperV.Rules["KS-WSL-Allow"]);
+            var s = Read(ks);
+            Assert.True(s.Wsl);
+            Assert.Contains(s.Rules, r => r.Name == "KS-WSL-Allow" && r.Enabled); // shown in "Rules"
+
+            ks.SetWsl(false);
+            Assert.False(hyperV.Rules["KS-WSL-Allow"]);
+            Assert.False(Read(ks).Wsl);
         }
 
         [Fact]
-        public void ClearInterfaces_KeepsLanAndNat()
+        public void SetWslOff_NoRule_NothingCreated()
+        {
+            Create().SetWsl(false);
+            Assert.Empty(hyperV.Rules);
+        }
+
+        [Fact]
+        public void WslNotInstalled_Unavailable()
+        {
+            hyperV.Available = false;
+            Assert.False(Read(Create()).WslAvailable);
+        }
+
+        [Theory]
+        [InlineData(true, true, true)]    // enabled legacy rule -> Allow WSL
+        [InlineData(false, true, false)]  // disabled legacy rule -> just removed
+        [InlineData(true, false, false)]  // WSL not installed -> just removed
+        public void Migration_ReplacesLegacyNatRule(bool legacyEnabled, bool wslAvailable, bool expectWsl)
+        {
+            hyperV.Available = wslAvailable;
+            fw.Rules.Add(new RuleSpec { Name = "KS-NAT-Allow", ApplicationName = "System", Enabled = legacyEnabled });
+            var ks = Create();
+            var s = Read(ks);
+            Assert.True(KillSwitch.NeedsNatMigration(s));
+
+            ks.MigrateNatRule(s);
+
+            Assert.Empty(fw.Rules);
+            var after = Read(ks);
+            Assert.Equal(expectWsl, after.Wsl);
+            Assert.False(KillSwitch.NeedsNatMigration(after));
+        }
+
+        [Fact]
+        public void ClearInterfaces_KeepsLanAndWsl()
         {
             var ks = Create();
             ks.SelectInterface("Wi-Fi");
             fw.Rules.Add(new RuleSpec { Name = "KS-App-happ-xray" });
-            ks.SetNat(true);
+            ks.SetLan(true);
+            ks.SetWsl(true);
 
             ks.ClearInterfaces();
 
-            Assert.Equal(new[] { "KS-NAT-Allow" }, RuleNames());
+            Assert.All(fw.Rules, r => Assert.StartsWith("KS-LAN-", r.Name));
+            Assert.True(hyperV.Rules["KS-WSL-Allow"]);
+        }
+
+        [Fact]
+        public void ResetAll_RemovesWslRule()
+        {
+            var ks = Create();
+            ks.SetWsl(true);
+            ks.ResetAll();
+            Assert.Empty(hyperV.Rules);
         }
 
         [Fact]
@@ -123,7 +184,7 @@ namespace Sveto4.Tests
             Assert.Equal(KsMode.On, s.Mode);
             Assert.Equal(new[] { "happ-xray" }, s.Interfaces.ToArray());
             Assert.True(s.Lan);
-            Assert.False(s.Nat);
+            Assert.False(s.Wsl);
         }
     }
 }
