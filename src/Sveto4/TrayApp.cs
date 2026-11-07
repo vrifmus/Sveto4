@@ -41,6 +41,10 @@ namespace Sveto4
         private readonly MenuItem miClients = new MenuItem("VPN clients");
         private readonly MenuItem miInterfaces = new MenuItem("Interfaces");
         private readonly MenuItem miRules = new MenuItem("Rules");
+        private readonly MenuItem miAutostart = new MenuItem("Start with Windows");
+        private readonly Autostart autostart = Autostart.CreateDefault();
+        private AutostartStatus autostartStatus = AutostartStatus.Unknown;
+        private bool autostartBusy;
         private readonly System.Windows.Forms.Timer pollTimer = new System.Windows.Forms.Timer { Interval = PollIntervalMs };
         private readonly System.Windows.Forms.Timer animTimer = new System.Windows.Forms.Timer { Interval = 15 };
         private readonly Icons icons = new Icons();
@@ -88,6 +92,7 @@ namespace Sveto4
                 Run("Block system leaks " + on, () => ks.SetBlockLeaks(on, active),
                     st => KillSwitch.PredictBlockLeaks(st, on, active));
             };
+            miAutostart.Click += (s, e) => OnAutostartClick();
 
             menu.MenuItems.AddRange(new[]
             {
@@ -105,6 +110,8 @@ namespace Sveto4
                 miLeaks,
                 new MenuItem("-"),
                 new MenuItem("Reset ALL", (s, e) => Run("Reset ALL", ks.ResetAll, KillSwitch.PredictReset)),
+                new MenuItem("-"),
+                miAutostart,
                 new MenuItem("-"),
                 new MenuItem("Exit", (s, e) => ExitApp()),
             });
@@ -131,6 +138,11 @@ namespace Sveto4
 
         private async void Start(bool autoEnable)
         {
+            UpdateAutostart(() =>
+            {
+                if (autostart.RepairIfBroken()) Log.Info("Autostart task pointed to the moved exe");
+            });
+
             busy = true;
             var s = await ReadStateAsync(full: true, previous: state);
             if (s != null) state = s;
@@ -294,6 +306,50 @@ namespace Sveto4
             else Run("Disable " + profile.Name, () => ks.DisableClient(profile, snapshot), st => KillSwitch.PredictClient(st, profile, false));
         }
 
+        private void OnAutostartClick()
+        {
+            var on = autostartStatus != AutostartStatus.On;
+            UpdateAutostart(on ? (Action)autostart.Enable : autostart.Disable,
+                            on ? AutostartStatus.On : AutostartStatus.Off,
+                            "Start with Windows " + on);
+        }
+
+        /// <summary>
+        /// Runs a Task Scheduler action off the UI thread, then re-reads the status.
+        /// Independent of the firewall operations (Reset ALL does not touch autostart).
+        /// </summary>
+        private async void UpdateAutostart(Action action, AutostartStatus? predicted = null, string what = null)
+        {
+            if (autostartBusy) return;
+            autostartBusy = true;
+            if (predicted != null) autostartStatus = predicted.Value;
+            try
+            {
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        action();
+                        if (what != null) Log.Info(what);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, what ?? "autostart");
+                    }
+                });
+                autostartStatus = await Task.Run(() => autostart.GetStatus());
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "read autostart");
+                autostartStatus = AutostartStatus.Unknown;
+            }
+            finally
+            {
+                autostartBusy = false;
+            }
+        }
+
         /// <summary>Network adapters changed: re-read soon instead of waiting for the next poll.</summary>
         private void OnNetworkAddressChanged(object sender, EventArgs e) =>
             ui.Post(_ =>
@@ -359,6 +415,12 @@ namespace Sveto4
             miInterfaces.Enabled = on;
             miClients.Enabled = on;
             miRules.Enabled = on;
+
+            miAutostart.Checked = autostartStatus == AutostartStatus.On;
+            miAutostart.Enabled = autostartStatus != AutostartStatus.Unknown;
+            miAutostart.Text = "Start with Windows" +
+                (autostartStatus == AutostartStatus.OtherCopy ? "\tother copy"
+                 : autostartStatus == AutostartStatus.Broken ? Warn + " Not found" : "");
 
             BuildClientsMenu();
             BuildInterfacesMenu();
