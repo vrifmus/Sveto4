@@ -239,10 +239,10 @@ namespace Sveto4
                 "Kill switch: " + mode,
                 "LAN: " + OnOff(s.Lan),
                 "NAT (WSL): " + OnOff(s.Nat),
-                "Block system leaks: " + leaks,
                 "VPN clients: " + (s.Clients.Any(c => c.Enabled)
                     ? string.Join(", ", s.Clients.Where(c => c.Enabled).Select(c => c.Profile.Name))
                     : "none"),
+                "Block system leaks: " + leaks,
                 "Interfaces: ");
 
             var interfaces = s.Interfaces.Count == 0

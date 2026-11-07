@@ -48,8 +48,8 @@ Sveto4
 Kill switch: ON
 LAN: OFF
 NAT (WSL): OFF
-Block system leaks: ON (4)
 VPN clients: Happ
+Block system leaks: ON (4)
 Interfaces: happ-xray, Wi-Fi
 ```
 
