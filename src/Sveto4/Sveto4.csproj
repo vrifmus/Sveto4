@@ -23,4 +23,8 @@
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sveto4.Tests" />
+  </ItemGroup>
+
 </Project>

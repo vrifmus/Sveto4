@@ -16,11 +16,35 @@ namespace Sveto4
         public bool Enabled { get; }
     }
 
-    /// <summary>
-    /// Late-bound wrapper over the Windows Firewall COM API (HNetCfg.FwPolicy2).
-    /// COM "Name" of a rule is the same as DisplayName in PowerShell cmdlets,
-    /// so rules created by the legacy script are recognized.
-    /// </summary>
+    /// <summary>Outbound Allow rule for all profiles. Only one of the filters is normally set.</summary>
+    internal sealed class RuleSpec
+    {
+        public string Name;
+        public bool Enabled = true;
+        /// <summary>Interface alias (e.g. "Wi-Fi").</summary>
+        public string Interface;
+        /// <summary>Full exe path, or "System" for the kernel.</summary>
+        public string ApplicationName;
+        /// <summary>Address or subnet, e.g. "10.0.0.0/255.0.0.0".</summary>
+        public string RemoteAddresses;
+    }
+
+    /// <summary>Windows Firewall operations used by the kill switch. Replaced by a fake in tests.</summary>
+    internal interface IFirewall
+    {
+        bool IsFirewallEnabled(int profile);
+        bool IsOutboundBlocked(int profile);
+        void SetOutboundBlocked(int profile, bool block);
+        /// <summary>Returns all rules whose name starts with the prefix (case-insensitive).</summary>
+        List<RuleInfo> GetRules(string prefix);
+        bool Exists(string name);
+        /// <summary>Enables or disables every rule with this exact name.</summary>
+        void SetEnabled(string name, bool enabled);
+        /// <summary>Removes every rule whose name matches the predicate.</summary>
+        void RemoveWhere(Func<string, bool> match);
+        void AddOutboundAllow(RuleSpec spec);
+    }
+
     internal static class Firewall
     {
         public const int ProfileDomain = 1;
@@ -28,26 +52,33 @@ namespace Sveto4
         public const int ProfilePublic = 4;
         public static readonly int[] Profiles = { ProfileDomain, ProfilePrivate, ProfilePublic };
 
+        public static string ProfileName(int profile) =>
+            profile == ProfileDomain ? "Domain" : profile == ProfilePrivate ? "Private" : "Public";
+    }
+
+    /// <summary>
+    /// Late-bound wrapper over the Windows Firewall COM API (HNetCfg.FwPolicy2).
+    /// COM "Name" of a rule is the same as DisplayName in PowerShell cmdlets,
+    /// so rules created by the legacy script are recognized.
+    /// </summary>
+    internal sealed class ComFirewall : IFirewall
+    {
         private const int ProfilesAll = 0x7FFFFFFF;
         private const int DirectionOut = 2;
         private const int ActionBlock = 0;
         private const int ActionAllow = 1;
         private const string RuleGroup = "Sveto4";
 
-        public static string ProfileName(int profile) =>
-            profile == ProfileDomain ? "Domain" : profile == ProfilePrivate ? "Private" : "Public";
-
-        public static bool IsFirewallEnabled(int profile) =>
+        public bool IsFirewallEnabled(int profile) =>
             Convert.ToBoolean(GetIndexed(NewPolicy(), "FirewallEnabled", profile));
 
-        public static bool IsOutboundBlocked(int profile) =>
+        public bool IsOutboundBlocked(int profile) =>
             Convert.ToInt32(GetIndexed(NewPolicy(), "DefaultOutboundAction", profile)) == ActionBlock;
 
-        public static void SetOutboundBlocked(int profile, bool block) =>
+        public void SetOutboundBlocked(int profile, bool block) =>
             SetIndexed(NewPolicy(), "DefaultOutboundAction", profile, block ? ActionBlock : ActionAllow);
 
-        /// <summary>Returns all rules whose name starts with the prefix (case-insensitive).</summary>
-        public static List<RuleInfo> GetRules(string prefix)
+        public List<RuleInfo> GetRules(string prefix)
         {
             var result = new List<RuleInfo>();
             dynamic policy = NewPolicy();
@@ -60,7 +91,7 @@ namespace Sveto4
             return result;
         }
 
-        public static bool Exists(string name)
+        public bool Exists(string name)
         {
             dynamic policy = NewPolicy();
             try
@@ -75,8 +106,7 @@ namespace Sveto4
             }
         }
 
-        /// <summary>Enables or disables every rule with this exact name.</summary>
-        public static void SetEnabled(string name, bool enabled)
+        public void SetEnabled(string name, bool enabled)
         {
             dynamic policy = NewPolicy();
             foreach (dynamic rule in policy.Rules)
@@ -87,8 +117,7 @@ namespace Sveto4
             }
         }
 
-        /// <summary>Removes every rule whose name matches the predicate.</summary>
-        public static void RemoveWhere(Func<string, bool> match)
+        public void RemoveWhere(Func<string, bool> match)
         {
             dynamic policy = NewPolicy();
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -109,17 +138,18 @@ namespace Sveto4
             }
         }
 
-        /// <summary>Creates an outbound Allow rule for all profiles.</summary>
-        public static void AddOutboundAllow(string name, bool enabled, Action<dynamic> configure)
+        public void AddOutboundAllow(RuleSpec spec)
         {
             dynamic rule = Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FWRule", true));
-            rule.Name = name;
+            rule.Name = spec.Name;
             rule.Grouping = RuleGroup;
             rule.Direction = DirectionOut;
             rule.Action = ActionAllow;
             rule.Profiles = ProfilesAll;
-            configure?.Invoke(rule);
-            rule.Enabled = enabled;
+            if (spec.Interface != null) rule.Interfaces = new object[] { spec.Interface };
+            if (spec.ApplicationName != null) rule.ApplicationName = spec.ApplicationName;
+            if (spec.RemoteAddresses != null) rule.RemoteAddresses = spec.RemoteAddresses;
+            rule.Enabled = spec.Enabled;
 
             dynamic policy = NewPolicy();
             policy.Rules.Add(rule);

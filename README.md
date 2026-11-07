@@ -8,7 +8,9 @@ VPN kill switch для Windows в системном трее. Блокируе�
 
 | Путь | Назначение |
 |---|---|
+| `Sveto4.sln` | Решение: приложение и тесты |
 | `src/Sveto4/` | Исходный код приложения (C#, WinForms) |
+| `tests/Sveto4.Tests/` | Юнит-тесты (xUnit), файрвол не затрагивают: `dotnet test` |
 | `build.ps1` | Сборка: `dist\sveto4.exe`; если программа из `dist` запущена, перезапускает её |
 | `docs/` | Документация: [ROADMAP](docs/ROADMAP.md), [аудит старой версии](docs/AUDIT.md) |
 | `legacy/` | PowerShell-версия (образец, не развивается) |

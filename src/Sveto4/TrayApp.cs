@@ -35,6 +35,7 @@ namespace Sveto4
         private readonly System.Windows.Forms.Timer pollTimer = new System.Windows.Forms.Timer { Interval = PollIntervalMs };
         private readonly System.Windows.Forms.Timer animTimer = new System.Windows.Forms.Timer { Interval = 15 };
         private readonly Icons icons = new Icons();
+        private readonly KillSwitch ks = KillSwitch.CreateDefault();
         private readonly SynchronizationContext ui;
 
         private KsState state = new KsState();
@@ -55,9 +56,9 @@ namespace Sveto4
             ui = SynchronizationContext.Current;
 
             miToggle.Click += (s, e) => OnToggle();
-            miOff.Click += (s, e) => Run("Turn OFF", () => KillSwitch.SetMode(false));
-            miLan.Click += (s, e) => { var on = !state.Lan; Run("LAN " + on, () => KillSwitch.SetLan(on)); };
-            miNat.Click += (s, e) => { var on = !state.Nat; Run("NAT " + on, () => KillSwitch.SetNat(on)); };
+            miOff.Click += (s, e) => Run("Turn OFF", () => ks.SetMode(false));
+            miLan.Click += (s, e) => { var on = !state.Lan; Run("LAN " + on, () => ks.SetLan(on)); };
+            miNat.Click += (s, e) => { var on = !state.Nat; Run("NAT " + on, () => ks.SetNat(on)); };
 
             menu.MenuItems.AddRange(new[]
             {
@@ -70,7 +71,7 @@ namespace Sveto4
                 miInterfaces,
                 miRules,
                 new MenuItem("-"),
-                new MenuItem("Reset ALL", (s, e) => Run("Reset ALL", KillSwitch.ResetAll)),
+                new MenuItem("Reset ALL", (s, e) => Run("Reset ALL", ks.ResetAll)),
                 new MenuItem("-"),
                 new MenuItem("Exit", (s, e) => ExitApp()),
             });
@@ -100,7 +101,7 @@ namespace Sveto4
             ApplyState();
 
             if (autoEnable && state.Mode != KsMode.On)
-                Run("Auto-enable", () => KillSwitch.SetMode(true));
+                Run("Auto-enable", () => ks.SetMode(true));
 
             pollTimer.Start();
         }
@@ -133,8 +134,8 @@ namespace Sveto4
 
         private void OnToggle()
         {
-            if (state.Mode == KsMode.On) Run("Turn OFF", () => KillSwitch.SetMode(false));
-            else Run("Turn ON", () => KillSwitch.SetMode(true));
+            if (state.Mode == KsMode.On) Run("Turn OFF", () => ks.SetMode(false));
+            else Run("Turn ON", () => ks.SetMode(true));
         }
 
         private void OnInterfaceClick(string iface)
@@ -142,11 +143,11 @@ namespace Sveto4
             if (state.Interfaces.Contains(iface))
             {
                 var remaining = state.Interfaces.Where(i => !string.Equals(i, iface, StringComparison.OrdinalIgnoreCase)).ToList();
-                Run("Deselect " + iface, () => KillSwitch.DeselectInterface(iface, remaining));
+                Run("Deselect " + iface, () => ks.DeselectInterface(iface, remaining));
             }
             else
             {
-                Run("Select " + iface, () => KillSwitch.SelectInterface(iface));
+                Run("Select " + iface, () => ks.SelectInterface(iface));
             }
         }
 
@@ -196,15 +197,15 @@ namespace Sveto4
         }
 
         /// <summary>Reads the state off the UI thread. Returns null on failure (e.g. right after wake-up).</summary>
-        private static async Task<KsState> ReadStateAsync(bool full, KsState previous)
+        private async Task<KsState> ReadStateAsync(bool full, KsState previous)
         {
             try
             {
                 return await Task.Run(() =>
                 {
                     var s = new KsState();
-                    KillSwitch.ReadProfiles(s);
-                    if (full) KillSwitch.ReadRules(s);
+                    ks.ReadProfiles(s);
+                    if (full) ks.ReadRules(s);
                     else s.CopyRulesFrom(previous);
                     KillSwitch.ReadAdapters(s);
                     return s;
@@ -253,7 +254,7 @@ namespace Sveto4
             miInterfaces.Text = selected.Count > 0 ? $"Interfaces ({selected.Count})" : "Interfaces";
             miInterfaces.MenuItems.Clear();
 
-            miInterfaces.MenuItems.Add(new MenuItem("None", (s, e) => Run("Clear interfaces", KillSwitch.ClearInterfaces))
+            miInterfaces.MenuItems.Add(new MenuItem("None", (s, e) => Run("Clear interfaces", ks.ClearInterfaces))
             {
                 Checked = selected.Count == 0,
             });
@@ -297,14 +298,15 @@ namespace Sveto4
 
         private Color TargetColor()
         {
-            if (busy) return Yellow;
-            if (state.Mode == KsMode.Off) return Red;
-            if (state.Mode == KsMode.Partial) return Orange;
-            if (state.Interfaces.Count == 0) return Gray;
-
-            var present = state.Adapters.Where(a => state.Interfaces.Contains(a.Name)).ToList();
-            if (present.Count == 0) return Blue;
-            return present.Any(a => a.IsUp) ? Green : Gray;
+            switch (KillSwitch.GetIconState(state, busy))
+            {
+                case IconState.Busy: return Yellow;
+                case IconState.Off: return Red;
+                case IconState.Partial: return Orange;
+                case IconState.AdapterMissing: return Blue;
+                case IconState.Connected: return Green;
+                default: return Gray; // NoInterfaces, Disconnected
+            }
         }
 
         // ---------- Icon animation (timer-based, no DoEvents) ----------
