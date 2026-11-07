@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,6 +38,7 @@ namespace Sveto4
         private readonly MenuItem miLan = new MenuItem("Allow LAN");
         private readonly MenuItem miNat = new MenuItem("Allow NAT (WSL)");
         private readonly MenuItem miBlockLeaks = new MenuItem("Block system leaks");
+        private readonly MenuItem miClients = new MenuItem("VPN clients");
         private readonly MenuItem miInterfaces = new MenuItem("Interfaces");
         private readonly MenuItem miRules = new MenuItem("Rules");
         private readonly System.Windows.Forms.Timer pollTimer = new System.Windows.Forms.Timer { Interval = PollIntervalMs };
@@ -52,6 +54,9 @@ namespace Sveto4
         private int generation;
         private int tick;
         private DateTime lastReconcile = DateTime.MinValue;
+        private DateTime lastSync = DateTime.MinValue;
+        private string lastSyncSignature;
+        private readonly System.Windows.Forms.Timer quickPollTimer = new System.Windows.Forms.Timer { Interval = 300 };
         private string lastTooltip;
 
         private Color currentColor = Yellow;
@@ -92,6 +97,7 @@ namespace Sveto4
                 new MenuItem("-"),
                 miLan,
                 miNat,
+                miClients,
                 miInterfaces,
                 miRules,
                 new MenuItem("-"),
@@ -112,6 +118,8 @@ namespace Sveto4
 
             animTimer.Tick += (s, e) => OnAnimTick();
             pollTimer.Tick += (s, e) => OnPoll();
+            quickPollTimer.Tick += (s, e) => OnQuickPoll();
+            NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
             MenuTheme.Apply();
@@ -139,6 +147,8 @@ namespace Sveto4
         {
             // The firewall state is intentionally left as is: the kill switch must survive app exit.
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
+            quickPollTimer.Stop();
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
             pollTimer.Stop();
             animTimer.Stop();
@@ -178,9 +188,7 @@ namespace Sveto4
         {
             if (state.Interfaces.Contains(iface))
             {
-                var remaining = state.Interfaces.Where(i => !string.Equals(i, iface, StringComparison.OrdinalIgnoreCase)).ToList();
-                Run("Deselect " + iface, () => ks.DeselectInterface(iface, remaining),
-                    st => KillSwitch.PredictDeselect(st, iface, remaining));
+                Run("Deselect " + iface, () => ks.DeselectInterface(iface), st => KillSwitch.PredictDeselect(st, iface));
             }
             else
             {
@@ -239,6 +247,22 @@ namespace Sveto4
             if (busy) return;
             ApplyState();
 
+            // VPN client profiles: allow new tunnel adapters (e.g. after a core switch), drop vanished ones.
+            // The same plan is not retried more often than every 30 s if it keeps failing.
+            if (state.RulesLoaded && KillSwitch.NeedsClientSync(state))
+            {
+                var signature = string.Join("|", state.Interfaces.OrderBy(i => i)) + "#" +
+                                string.Join("|", state.Adapters.Select(a => a.Name).OrderBy(n => n));
+                if (signature != lastSyncSignature || DateTime.UtcNow - lastSync > TimeSpan.FromSeconds(30))
+                {
+                    lastSyncSignature = signature;
+                    lastSync = DateTime.UtcNow;
+                    var snapshot = state;
+                    Run("Sync VPN client adapters", () => ks.SyncClients(snapshot), SyncPrediction(snapshot));
+                    return;
+                }
+            }
+
             // Self-healing: Windows updates or policies may re-enable system rules (or the
             // kill switch may be turned off outside the app). Retry at most every 5 minutes.
             if (state.RulesLoaded && KillSwitch.NeedsLeakReconcile(state)
@@ -248,6 +272,41 @@ namespace Sveto4
                 var snapshot = state;
                 Run("Reconcile system rules", () => ks.ReconcileLeaks(snapshot));
             }
+        }
+
+        private static Func<KsState, KsState> SyncPrediction(KsState snapshot) => st =>
+        {
+            var n = st;
+            foreach (var c in snapshot.Clients.Where(c => c.Enabled))
+            {
+                var plan = ClientProfiles.PlanAdapters(c.Profile, n);
+                foreach (var iface in plan.ToSelect) n = KillSwitch.PredictSelect(n, iface);
+                foreach (var iface in plan.ToDeselect) n = KillSwitch.PredictDeselect(n, iface);
+            }
+            return n;
+        };
+
+        private void OnClientClick(ClientProfile profile)
+        {
+            var on = !state.IsClientEnabled(profile.Id);
+            var snapshot = state;
+            if (on) Run("Enable " + profile.Name, () => ks.EnableClient(profile), st => KillSwitch.PredictClient(st, profile, true));
+            else Run("Disable " + profile.Name, () => ks.DisableClient(profile, snapshot), st => KillSwitch.PredictClient(st, profile, false));
+        }
+
+        /// <summary>Network adapters changed: re-read soon instead of waiting for the next poll.</summary>
+        private void OnNetworkAddressChanged(object sender, EventArgs e) =>
+            ui.Post(_ =>
+            {
+                quickPollTimer.Stop();
+                quickPollTimer.Start(); // events come in bursts: wait until they settle
+            }, null);
+
+        private void OnQuickPoll()
+        {
+            quickPollTimer.Stop();
+            if (busy || polling) { quickPollTimer.Start(); return; } // retry shortly
+            OnPoll();
         }
 
         /// <summary>Reads the state off the UI thread. Returns null on failure (e.g. right after wake-up).</summary>
@@ -261,7 +320,7 @@ namespace Sveto4
                     ks.ReadProfiles(s);
                     if (full) ks.ReadRules(s);
                     else s.CopyRulesFrom(previous);
-                    KillSwitch.ReadAdapters(s);
+                    ks.ReadAdapters(s);
                     return s;
                 });
             }
@@ -298,8 +357,10 @@ namespace Sveto4
             miNat.Checked = state.Nat;
             miNat.Enabled = on;
             miInterfaces.Enabled = on;
+            miClients.Enabled = on;
             miRules.Enabled = on;
 
+            BuildClientsMenu();
             BuildInterfacesMenu();
             BuildRulesMenu();
             BuildLeaksMenu(on);
@@ -338,6 +399,27 @@ namespace Sveto4
             miLeaks.MenuItems.Add(new MenuItem("-"));
         }
 
+        private void BuildClientsMenu()
+        {
+            miClients.MenuItems.Clear();
+            var enabled = state.Clients.Count(c => c.Enabled);
+            miClients.Text = enabled > 0 ? $"VPN clients ({enabled})" : "VPN clients";
+
+            foreach (var c in state.Clients)
+            {
+                var profile = c.Profile;
+                // Not installed: still clickable when enabled, so it can be turned off.
+                var mark = c.InstallDir == null ? Warn + " Not found" : "";
+                miClients.MenuItems.Add(new MenuItem(profile.Name + mark, (s, e) => OnClientClick(profile))
+                {
+                    Checked = c.Enabled,
+                    Enabled = c.Enabled || c.InstallDir != null,
+                });
+            }
+            if (state.Clients.Count == 0)
+                miClients.MenuItems.Add(new MenuItem("No profiles") { Enabled = false });
+        }
+
         private void BuildInterfacesMenu()
         {
             var selected = state.Interfaces;
@@ -360,12 +442,15 @@ namespace Sveto4
                 var isSelected = selected.Contains(iface);
                 // Selected but absent or disconnected: marked on the right; clicking it deselects.
                 var adapter = state.Adapters.FirstOrDefault(a => string.Equals(a.Name, iface, StringComparison.OrdinalIgnoreCase));
-                var mark = !isSelected || (adapter != null && adapter.IsUp) ? ""
+                var client = isSelected ? state.ManagingClient(iface) : null;
+                var mark = client != null ? "\t" + client.Name // managed by a VPN client profile
+                         : !isSelected || (adapter != null && adapter.IsUp) ? ""
                          : adapter == null ? Warn + " Not found"
                          : Warn + " Disconnected";
                 miInterfaces.MenuItems.Add(new MenuItem(iface + mark, (s, e) => OnInterfaceClick(iface))
                 {
                     Checked = isSelected,
+                    Enabled = client == null, // turn the profile off to remove it
                 });
             }
         }

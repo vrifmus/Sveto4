@@ -98,6 +98,15 @@ namespace Sveto4
         public List<LeakInfo> DisabledLeaks = new List<LeakInfo>();
         /// <summary>"Block system leaks" setting.</summary>
         public bool BlockLeaks = true;
+        /// <summary>VPN client profiles and whether they are enabled.</summary>
+        public List<ClientStatus> Clients = new List<ClientStatus>();
+
+        public bool IsClientEnabled(string clientId) => Clients.Any(c => c.Enabled && c.Profile.Id == clientId);
+
+        /// <summary>Enabled client that manages this interface, or null.</summary>
+        public ClientProfile ManagingClient(string iface) =>
+            Clients.Where(c => c.Enabled).Select(c => c.Profile)
+                   .FirstOrDefault(p => ClientProfiles.IsClientAdapterName(p, iface, this));
 
         /// <summary>Copy with its own collections (adapters are shared: they are never modified).</summary>
         public KsState Clone() => new KsState
@@ -113,11 +122,13 @@ namespace Sveto4
             Leaks = new List<LeakInfo>(Leaks),
             DisabledLeaks = new List<LeakInfo>(DisabledLeaks),
             BlockLeaks = BlockLeaks,
+            Clients = new List<ClientStatus>(Clients),
         };
 
         public void CopyRulesFrom(KsState other)
         {
             RulesLoaded = other.RulesLoaded;
+            Clients = other.Clients;
             Leaks = other.Leaks;
             DisabledLeaks = other.DisabledLeaks;
             BlockLeaks = other.BlockLeaks;
@@ -150,9 +161,6 @@ namespace Sveto4
             ["fc00::/7"] = "fc00::/7",
         };
 
-        /// <summary>VPN clients whose processes get their own allow rules.</summary>
-        private static readonly string[] TargetApps = { "happ", "hiddify" };
-
         private static readonly string[] SystemAdapterMarkers =
         {
             "WAN Miniport", "Hyper-V Virtual Switch Extension", "Microsoft Kernel Debug",
@@ -160,21 +168,18 @@ namespace Sveto4
         };
 
         private readonly IFirewall firewall;
-        private readonly Func<IEnumerable<ProcessEntry>> getProcesses;
-        private readonly Func<string, bool> fileExists;
+        private readonly ClientEnvironment env;
         private readonly IStateStore store;
 
-        public KillSwitch(IFirewall firewall, Func<IEnumerable<ProcessEntry>> getProcesses, Func<string, bool> fileExists,
-                          IStateStore store)
+        public KillSwitch(IFirewall firewall, ClientEnvironment env, IStateStore store)
         {
             this.firewall = firewall;
-            this.getProcesses = getProcesses;
-            this.fileExists = fileExists;
+            this.env = env;
             this.store = store;
         }
 
         public static KillSwitch CreateDefault() =>
-            new KillSwitch(new ComFirewall(), GetWmiProcesses, File.Exists, new FileStateStore());
+            new KillSwitch(new ComFirewall(), ClientProfiles.CreateDefaultEnvironment(GetWmiProcesses), new FileStateStore());
 
         // ---------- Pure logic ----------
 
@@ -235,6 +240,9 @@ namespace Sveto4
                 "LAN: " + OnOff(s.Lan),
                 "NAT (WSL): " + OnOff(s.Nat),
                 "Block system leaks: " + leaks,
+                "VPN clients: " + (s.Clients.Any(c => c.Enabled)
+                    ? string.Join(", ", s.Clients.Where(c => c.Enabled).Select(c => c.Profile.Name))
+                    : "none"),
                 "Interfaces: ");
 
             var interfaces = s.Interfaces.Count == 0
@@ -287,7 +295,6 @@ namespace Sveto4
             return n;
         }
 
-        /// <remarks>Client process rules (KS-App-*) are not predicted: they depend on running processes.</remarks>
         public static KsState PredictSelect(KsState s, string iface)
         {
             var n = s.Clone();
@@ -296,14 +303,36 @@ namespace Sveto4
             return n;
         }
 
-        public static KsState PredictDeselect(KsState s, string iface, ICollection<string> remaining)
+        public static KsState PredictDeselect(KsState s, string iface)
         {
             var n = s.Clone();
             n.Interfaces.Remove(iface);
             RemoveRules(n, r => string.Equals(r, AllowPrefix + iface, StringComparison.OrdinalIgnoreCase));
-            var app = MatchApp(iface);
-            if (app != null && !remaining.Any(i => MatchApp(i) == app))
-                RemoveRules(n, r => r.StartsWith(AppPrefix + app + "-", StringComparison.OrdinalIgnoreCase));
+            return n;
+        }
+
+        /// <remarks>Executable rules (KS-App-*) are not predicted: they depend on files on disk.</remarks>
+        public static KsState PredictClient(KsState s, ClientProfile profile, bool on)
+        {
+            var n = s.Clone();
+            SetClientEnabled(n, profile.Id, on);
+            if (on)
+            {
+                foreach (var name in ClientProfiles.PlanAdapters(profile, n).ToSelect)
+                {
+                    n.Interfaces.Add(name);
+                    SetRule(n, AllowPrefix + name, true);
+                }
+            }
+            else
+            {
+                foreach (var iface in n.Interfaces.Where(i => ClientProfiles.IsClientAdapterName(profile, i, n)).ToList())
+                {
+                    n.Interfaces.Remove(iface);
+                    RemoveRules(n, r => string.Equals(r, AllowPrefix + iface, StringComparison.OrdinalIgnoreCase));
+                }
+                RemoveRules(n, r => r.StartsWith(AppPrefix + profile.Id + "-", StringComparison.OrdinalIgnoreCase));
+            }
             return n;
         }
 
@@ -313,18 +342,21 @@ namespace Sveto4
             n.Interfaces.Clear();
             RemoveRules(n, r => r.StartsWith(AllowPrefix, StringComparison.OrdinalIgnoreCase)
                              || r.StartsWith(AppPrefix, StringComparison.OrdinalIgnoreCase));
+            foreach (var c in n.Clients.ToList()) SetClientEnabled(n, c.Profile.Id, false);
             return n;
         }
 
         public static KsState PredictReset(KsState s)
         {
-            var n = PredictMode(s, false);
-            n.Interfaces.Clear();
+            var n = PredictClear(PredictMode(s, false));
             n.Lan = false;
             n.Nat = false;
             n.Rules = new List<RuleInfo>();
             return n;
         }
+
+        private static void SetClientEnabled(KsState n, string clientId, bool on) =>
+            n.Clients = n.Clients.Select(c => c.Profile.Id == clientId ? new ClientStatus(c.Profile, on, c.InstallDir) : c).ToList();
 
         private static void MoveLeaks(List<LeakInfo> from, List<LeakInfo> to)
         {
@@ -345,10 +377,6 @@ namespace Sveto4
 
         public static bool IsSystemAdapter(string description) =>
             SystemAdapterMarkers.Any(m => (description ?? "").IndexOf(m, StringComparison.OrdinalIgnoreCase) >= 0);
-
-        /// <summary>Returns the VPN client whose name occurs in the interface name, or null.</summary>
-        public static string MatchApp(string iface) =>
-            TargetApps.FirstOrDefault(a => iface.IndexOf(a, StringComparison.OrdinalIgnoreCase) >= 0);
 
         public const string LeakDns = "DNS";
         public const string LeakIpv6Tunnel = "IPv6 tunnel (6to4/ISATAP)";
@@ -407,22 +435,28 @@ namespace Sveto4
         private static bool PortsContain(string ports, string port) =>
             (ports ?? "").Split(',').Any(p => p.Trim() == port);
 
-        /// <summary>Exe paths of the client's processes and of their direct children (e.g. xray core).</summary>
-        public static List<string> CollectAppPaths(IEnumerable<ProcessEntry> processes, string app)
+        /// <summary>
+        /// True when an enabled client has adapters to add/remove, or its executable rules are missing
+        /// (e.g. the client was installed after the profile was enabled).
+        /// </summary>
+        public static bool NeedsClientSync(KsState s) =>
+            s.Clients.Where(c => c.Enabled).Any(c =>
+                !ClientProfiles.PlanAdapters(c.Profile, s).IsEmpty
+                || (c.InstallDir != null && !s.Rules.Any(r => r.Name.StartsWith(AppPrefix + c.Profile.Id + "-", StringComparison.OrdinalIgnoreCase))));
+
+        /// <summary>Rule names for client executables; duplicates in subfolders get a numeric suffix.</summary>
+        public static List<KeyValuePair<string, string>> AppRuleNames(ClientProfile profile, IEnumerable<string> exePaths)
         {
-            var list = processes.ToList();
-            var parents = new HashSet<uint>();
-            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var p in list.Where(p => p.Name != null && p.Name.IndexOf(app, StringComparison.OrdinalIgnoreCase) >= 0))
+            var result = new List<KeyValuePair<string, string>>();
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in exePaths)
             {
-                parents.Add(p.Pid);
-                if (!string.IsNullOrEmpty(p.ExePath)) paths.Add(p.ExePath);
+                var baseName = $"{AppPrefix}{profile.Id}-{Path.GetFileNameWithoutExtension(path)}";
+                var name = baseName;
+                for (var i = 2; !used.Add(name); i++) name = baseName + "-" + i;
+                result.Add(new KeyValuePair<string, string>(name, path));
             }
-            foreach (var p in list.Where(p => parents.Contains(p.ParentPid) && !string.IsNullOrEmpty(p.ExePath)))
-                paths.Add(p.ExePath);
-
-            return paths.ToList();
+            return result;
         }
 
         // ---------- Read ----------
@@ -442,16 +476,17 @@ namespace Sveto4
             s.Leaks = FindLeaks(all.Where(r => r.IsOutboundAllow && r.Enabled));
             s.DisabledLeaks = store.LoadDisabledRules();
             s.BlockLeaks = store.BlockSystemLeaks;
-        }
-
-        public static void ReadAdapters(KsState s)
-        {
-            s.Adapters = NetworkInterface.GetAllNetworkInterfaces()
-                .Where(n => n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                .Select(n => new AdapterInfo(n.Name, n.Description ?? "", n.OperationalStatus == OperationalStatus.Up,
-                                             IsSystemAdapter(n.Description)))
+            s.Clients = ClientProfiles.All
+                .Select(p => new ClientStatus(p, IsClientEnabled(p, s.Rules), ClientProfiles.ResolveInstallDir(p, env)))
                 .ToList();
         }
+
+        /// <summary>Stored setting; before it is first set, a client counts as enabled if its rules exist (migration).</summary>
+        private bool IsClientEnabled(ClientProfile profile, List<RuleInfo> rules) =>
+            store.GetClientEnabled(profile.Id)
+            ?? rules.Any(r => r.Name.StartsWith(AppPrefix + profile.Id + "-", StringComparison.OrdinalIgnoreCase));
+
+        public void ReadAdapters(KsState s) => s.Adapters = env.Adapters();
 
         // ---------- Actions ----------
 
@@ -530,27 +565,18 @@ namespace Sveto4
             var name = AllowPrefix + iface;
             if (firewall.Exists(name)) firewall.SetEnabled(name, true);
             else firewall.AddOutboundAllow(new RuleSpec { Name = name, Interface = iface });
-
-            var app = MatchApp(iface);
-            if (app != null) AddAppRules(app);
         }
 
-        /// <param name="remaining">Interfaces that stay selected after this one is removed.</param>
-        public void DeselectInterface(string iface, ICollection<string> remaining)
+        public void DeselectInterface(string iface)
         {
             var name = AllowPrefix + iface;
             firewall.RemoveWhere(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
-
-            var app = MatchApp(iface);
-            if (app != null && !remaining.Any(i => MatchApp(i) == app))
-            {
-                var appRules = AppPrefix + app + "-";
-                firewall.RemoveWhere(n => n.StartsWith(appRules, StringComparison.OrdinalIgnoreCase));
-            }
         }
 
+        /// <summary>"None": removes all interface and client rules and disables client profiles.</summary>
         public void ClearInterfaces()
         {
+            foreach (var profile in ClientProfiles.All) store.SetClientEnabled(profile.Id, false);
             firewall.RemoveWhere(n => n.StartsWith(AllowPrefix, StringComparison.OrdinalIgnoreCase)
                                    || n.StartsWith(AppPrefix, StringComparison.OrdinalIgnoreCase));
         }
@@ -558,28 +584,73 @@ namespace Sveto4
         public void ResetAll()
         {
             SetMode(false);
+            foreach (var profile in ClientProfiles.All) store.SetClientEnabled(profile.Id, false);
             firewall.RemoveWhere(n => n.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase));
         }
 
-        // ---------- VPN client processes ----------
+        // ---------- VPN client profiles ----------
+
+        /// <summary>Allows the client's executables and all its present tunnel adapters.</summary>
+        public void EnableClient(ClientProfile profile)
+        {
+            store.SetClientEnabled(profile.Id, true);
+            AddClientAppRules(profile);
+
+            var s = new KsState();
+            ReadRules(s);
+            ReadAdapters(s);
+            foreach (var iface in ClientProfiles.PlanAdapters(profile, s).ToSelect) SelectInterface(iface);
+        }
+
+        /// <summary>Removes the client's executable rules and its adapter rules.</summary>
+        public void DisableClient(ClientProfile profile, KsState s)
+        {
+            store.SetClientEnabled(profile.Id, false);
+            firewall.RemoveWhere(n => n.StartsWith(AppPrefix + profile.Id + "-", StringComparison.OrdinalIgnoreCase));
+            foreach (var iface in s.Interfaces.Where(i => ClientProfiles.IsClientAdapterName(profile, i, s)).ToList())
+                DeselectInterface(iface);
+        }
+
+        /// <summary>For enabled clients: adds new adapters, removes vanished ones, restores missing executable rules.</summary>
+        public void SyncClients(KsState s)
+        {
+            foreach (var c in s.Clients.Where(c => c.Enabled))
+            {
+                var plan = ClientProfiles.PlanAdapters(c.Profile, s);
+                foreach (var iface in plan.ToSelect) SelectInterface(iface);
+                foreach (var iface in plan.ToDeselect) DeselectInterface(iface);
+                if (plan.ToSelect.Count + plan.ToDeselect.Count > 0)
+                    Log.Info($"{c.Profile.Name} adapters: +[{string.Join(", ", plan.ToSelect)}] -[{string.Join(", ", plan.ToDeselect)}]");
+
+                var hasAppRules = s.Rules.Any(r => r.Name.StartsWith(AppPrefix + c.Profile.Id + "-", StringComparison.OrdinalIgnoreCase));
+                if (!hasAppRules && c.InstallDir != null) AddClientAppRules(c.Profile);
+            }
+        }
 
         /// <summary>
-        /// Allows outbound traffic for the client's processes and their children,
-        /// so the client can reach the VPN server through the physical interface.
+        /// Allows every executable in the client's install folder (not only running ones),
+        /// so cores started later (e.g. sing-box) can reach the VPN server through the physical interface.
         /// </summary>
-        private void AddAppRules(string app)
+        private void AddClientAppRules(ClientProfile profile)
         {
-            foreach (var exePath in CollectAppPaths(getProcesses(), app).Where(fileExists))
+            var dir = ClientProfiles.ResolveInstallDir(profile, env);
+            if (dir == null)
             {
-                var name = $"{AppPrefix}{app}-{Path.GetFileNameWithoutExtension(exePath)}";
+                Log.Info(profile.Name + ": install folder not found");
+                return;
+            }
+
+            var appRules = AppPrefix + profile.Id + "-";
+            firewall.RemoveWhere(n => n.StartsWith(appRules, StringComparison.OrdinalIgnoreCase));
+            foreach (var rule in AppRuleNames(profile, ClientProfiles.ExecutablesToAllow(profile, dir, env)))
+            {
                 try
                 {
-                    firewall.RemoveWhere(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
-                    firewall.AddOutboundAllow(new RuleSpec { Name = name, ApplicationName = exePath });
+                    firewall.AddOutboundAllow(new RuleSpec { Name = rule.Key, ApplicationName = rule.Value });
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(ex, "app rule " + name);
+                    Log.Error(ex, "app rule " + rule.Key);
                 }
             }
         }

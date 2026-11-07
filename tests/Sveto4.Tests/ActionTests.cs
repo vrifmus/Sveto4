@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 
@@ -7,13 +6,8 @@ namespace Sveto4.Tests
     public class ActionTests
     {
         private readonly FakeFirewall fw = new FakeFirewall();
-        private readonly List<ProcessEntry> processes = new List<ProcessEntry>
-        {
-            new ProcessEntry { Pid = 10, ParentPid = 1, Name = "Happ.exe", ExePath = @"C:\Happ\Happ.exe" },
-            new ProcessEntry { Pid = 12, ParentPid = 10, Name = "xray.exe", ExePath = @"C:\Happ\core\xray.exe" },
-        };
 
-        private KillSwitch Create() => new KillSwitch(fw, () => processes, path => true, new FakeStore());
+        private KillSwitch Create() => new KillSwitch(fw, TestEnv.Create(), new FakeStore());
 
         private string[] RuleNames() => fw.Rules.Select(r => r.Name).OrderBy(n => n).ToArray();
 
@@ -28,23 +22,15 @@ namespace Sveto4.Tests
         }
 
         [Fact]
-        public void SelectInterface_PlainAdapter_CreatesOnlyInterfaceRule()
+        public void SelectInterface_CreatesOnlyInterfaceRule()
         {
-            Create().SelectInterface("Wi-Fi");
-
-            var rule = Assert.Single(fw.Rules);
-            Assert.Equal("KS-Allow-Wi-Fi", rule.Name);
-            Assert.Equal("Wi-Fi", rule.Interface);
-            Assert.True(rule.Enabled);
-        }
-
-        [Fact]
-        public void SelectInterface_ClientAdapter_AlsoAllowsClientProcesses()
-        {
+            // Client executables are allowed by the client profile, not by selecting an adapter.
             Create().SelectInterface("happ-xray");
 
-            Assert.Equal(new[] { "KS-Allow-happ-xray", "KS-App-happ-Happ", "KS-App-happ-xray" }, RuleNames());
-            Assert.Equal(@"C:\Happ\core\xray.exe", fw.Find("KS-App-happ-xray").ApplicationName);
+            var rule = Assert.Single(fw.Rules);
+            Assert.Equal("KS-Allow-happ-xray", rule.Name);
+            Assert.Equal("happ-xray", rule.Interface);
+            Assert.True(rule.Enabled);
         }
 
         [Fact]
@@ -58,37 +44,15 @@ namespace Sveto4.Tests
         }
 
         [Fact]
-        public void SelectInterface_Twice_DoesNotDuplicateAppRules()
+        public void DeselectInterface_RemovesOnlyItsRule()
         {
             var ks = Create();
-            ks.SelectInterface("happ-xray");
-            ks.SelectInterface("happ-sing-box");
-
-            Assert.Single(fw.Rules, r => r.Name == "KS-App-happ-xray");
-        }
-
-        [Fact]
-        public void DeselectLastClientInterface_RemovesAppRules()
-        {
-            var ks = Create();
-            ks.SelectInterface("happ-xray");
             ks.SelectInterface("Wi-Fi");
+            ks.SelectInterface("Ethernet");
 
-            ks.DeselectInterface("happ-xray", remaining: new[] { "Wi-Fi" });
+            ks.DeselectInterface("Wi-Fi");
 
-            Assert.Equal(new[] { "KS-Allow-Wi-Fi" }, RuleNames());
-        }
-
-        [Fact]
-        public void DeselectClientInterface_KeepsAppRulesWhileAnotherClientAdapterSelected()
-        {
-            var ks = Create();
-            ks.SelectInterface("happ-xray");
-            ks.SelectInterface("happ-sing-box");
-
-            ks.DeselectInterface("happ-xray", remaining: new[] { "happ-sing-box" });
-
-            Assert.Equal(new[] { "KS-Allow-happ-sing-box", "KS-App-happ-Happ", "KS-App-happ-xray" }, RuleNames());
+            Assert.Equal(new[] { "KS-Allow-Ethernet" }, RuleNames());
         }
 
         [Fact]
@@ -120,7 +84,8 @@ namespace Sveto4.Tests
         public void ClearInterfaces_KeepsLanAndNat()
         {
             var ks = Create();
-            ks.SelectInterface("happ-xray");
+            ks.SelectInterface("Wi-Fi");
+            fw.Rules.Add(new RuleSpec { Name = "KS-App-happ-xray" });
             ks.SetNat(true);
 
             ks.ClearInterfaces();

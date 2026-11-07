@@ -21,7 +21,7 @@ namespace Sveto4.Tests
             fw.SystemRules.AddRange(new[] { dns, teredo, dhcp });
         }
 
-        private KillSwitch Create() => new KillSwitch(fw, () => new ProcessEntry[0], p => true, store);
+        private KillSwitch Create() => new KillSwitch(fw, TestEnv.Create(), store);
 
         [Fact]
         public void TurnOn_DisablesLeakRulesOnly_AndRemembersThem()
@@ -131,7 +131,7 @@ namespace Sveto4.Tests
         {
             var savedWhileEnabled = false;
             var store2 = new RecordingStore(() => savedWhileEnabled = dns.Enabled);
-            new KillSwitch(fw, () => new ProcessEntry[0], p => true, store2).SetMode(true);
+            new KillSwitch(fw, TestEnv.Create(), store2).SetMode(true);
 
             Assert.True(savedWhileEnabled);
             Assert.False(dns.Enabled);
@@ -145,6 +145,8 @@ namespace Sveto4.Tests
             public List<LeakInfo> LoadDisabledRules() => disabled.ToList();
             public void SaveDisabledRules(List<LeakInfo> rules) { onSave(); disabled = rules.ToList(); }
             public bool BlockSystemLeaks { get; set; } = true;
+            public bool? GetClientEnabled(string clientId) => null;
+            public void SetClientEnabled(string clientId, bool enabled) { }
         }
 
         [Fact]

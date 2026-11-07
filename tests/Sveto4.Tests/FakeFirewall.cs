@@ -72,5 +72,8 @@ namespace Sveto4.Tests
         public List<LeakInfo> LoadDisabledRules() => Disabled.ToList();
         public void SaveDisabledRules(List<LeakInfo> rules) => Disabled = rules.ToList();
         public bool BlockSystemLeaks { get; set; } = true;
+        public readonly Dictionary<string, bool> Clients = new Dictionary<string, bool>();
+        public bool? GetClientEnabled(string clientId) => Clients.TryGetValue(clientId, out var v) ? v : (bool?)null;
+        public void SetClientEnabled(string clientId, bool enabled) => Clients[clientId] = enabled;
     }
 }

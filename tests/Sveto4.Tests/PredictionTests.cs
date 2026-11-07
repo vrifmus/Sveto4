@@ -19,18 +19,21 @@ namespace Sveto4.Tests
         {
             fw.SystemRules.Add(LeakTests.Dns());
             fw.SystemRules.Add(LeakTests.Teredo);
-            var processes = new[]
-            {
-                new ProcessEntry { Pid = 10, ParentPid = 1, Name = "Happ.exe", ExePath = @"C:\Happ\Happ.exe" },
-            };
-            ks = new KillSwitch(fw, () => processes, p => true, store);
+            ks = new KillSwitch(fw, TestEnv.Create(files: TestEnv.HappFiles, adapters: adapters), store);
         }
+
+        private readonly List<AdapterInfo> adapters = new List<AdapterInfo>
+        {
+            TestEnv.Adapter("Wi-Fi"),
+            TestEnv.Adapter("happ-xray", "Happ Tunnel"),
+        };
 
         private KsState Read()
         {
             var s = new KsState();
             ks.ReadProfiles(s);
             ks.ReadRules(s);
+            ks.ReadAdapters(s);
             return s;
         }
 
@@ -49,7 +52,9 @@ namespace Sveto4.Tests
             Assert.Equal(Sorted(actual.Interfaces), Sorted(predicted.Interfaces));
             Assert.Equal(Sorted(actual.Leaks.Select(l => l.RuleName)), Sorted(predicted.Leaks.Select(l => l.RuleName)));
             Assert.Equal(Sorted(actual.DisabledLeaks.Select(l => l.RuleName)), Sorted(predicted.DisabledLeaks.Select(l => l.RuleName)));
-            // Client process rules depend on running processes and are not predicted.
+            Assert.Equal(Sorted(actual.Clients.Where(c => c.Enabled).Select(c => c.Profile.Id)),
+                         Sorted(predicted.Clients.Where(c => c.Enabled).Select(c => c.Profile.Id)));
+            // Client executable rules depend on files on disk and are not predicted.
             Assert.Equal(OwnRules(actual), OwnRules(predicted));
         }
 
@@ -116,8 +121,22 @@ namespace Sveto4.Tests
         {
             Check(() => ks.SelectInterface("happ-xray"), s => KillSwitch.PredictSelect(s, "happ-xray"));
             Check(() => ks.SelectInterface("Wi-Fi"), s => KillSwitch.PredictSelect(s, "Wi-Fi"));
-            var remaining = new[] { "Wi-Fi" };
-            Check(() => ks.DeselectInterface("happ-xray", remaining), s => KillSwitch.PredictDeselect(s, "happ-xray", remaining));
+            Check(() => ks.DeselectInterface("happ-xray"), s => KillSwitch.PredictDeselect(s, "happ-xray"));
+        }
+
+        [Fact]
+        public void EnableAndDisableHapp()
+        {
+            Check(() => ks.EnableClient(ClientProfiles.Happ), s => KillSwitch.PredictClient(s, ClientProfiles.Happ, true));
+            var snapshot = Read();
+            Check(() => ks.DisableClient(ClientProfiles.Happ, snapshot), s => KillSwitch.PredictClient(s, ClientProfiles.Happ, false));
+        }
+
+        [Fact]
+        public void ClearInterfaces_DisablesClient()
+        {
+            ks.EnableClient(ClientProfiles.Happ);
+            Check(() => ks.ClearInterfaces(), KillSwitch.PredictClear);
         }
 
         [Fact]

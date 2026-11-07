@@ -12,6 +12,9 @@ namespace Sveto4
         List<LeakInfo> LoadDisabledRules();
         void SaveDisabledRules(List<LeakInfo> rules);
         bool BlockSystemLeaks { get; set; }
+        /// <summary>Null when never set (then it is inferred from existing rules).</summary>
+        bool? GetClientEnabled(string clientId);
+        void SetClientEnabled(string clientId, bool enabled);
     }
 
     /// <summary>Files in %ProgramData%\Sveto4 (machine-wide, the app always runs elevated).</summary>
@@ -49,6 +52,15 @@ namespace Sveto4
             get => ReadSetting(BlockLeaksKey) != "0"; // on by default
             set => WriteSetting(BlockLeaksKey, value ? "1" : "0");
         }
+
+        public bool? GetClientEnabled(string clientId)
+        {
+            var value = ReadSetting("Client." + clientId);
+            return value == null ? (bool?)null : value == "1";
+        }
+
+        public void SetClientEnabled(string clientId, bool enabled) =>
+            WriteSetting("Client." + clientId, enabled ? "1" : "0");
 
         private static string ReadSetting(string key)
         {

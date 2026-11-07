@@ -87,7 +87,7 @@ namespace Sveto4.Tests
         {
             var fw = new FakeFirewall();
             fw.SystemRules.Add(Dns());
-            var ks = new KillSwitch(fw, () => new ProcessEntry[0], p => true, new FakeStore());
+            var ks = new KillSwitch(fw, TestEnv.Create(), new FakeStore());
 
             var s = new KsState();
             ks.ReadRules(s);
