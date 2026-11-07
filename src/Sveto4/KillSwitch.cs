@@ -92,13 +92,19 @@ namespace Sveto4
         public bool Lan;
         public bool Nat;
         public List<AdapterInfo> Adapters = new List<AdapterInfo>();
-        /// <summary>System rules that bypass the kill switch (warning only, not changed).</summary>
+        /// <summary>Enabled system rules that let traffic bypass the kill switch.</summary>
         public List<LeakInfo> Leaks = new List<LeakInfo>();
+        /// <summary>System rules disabled by the app while the kill switch is on.</summary>
+        public List<LeakInfo> DisabledLeaks = new List<LeakInfo>();
+        /// <summary>"Block system leaks" setting.</summary>
+        public bool BlockLeaks = true;
 
         public void CopyRulesFrom(KsState other)
         {
             RulesLoaded = other.RulesLoaded;
             Leaks = other.Leaks;
+            DisabledLeaks = other.DisabledLeaks;
+            BlockLeaks = other.BlockLeaks;
             Rules = other.Rules;
             Interfaces = other.Interfaces;
             Lan = other.Lan;
@@ -140,15 +146,19 @@ namespace Sveto4
         private readonly IFirewall firewall;
         private readonly Func<IEnumerable<ProcessEntry>> getProcesses;
         private readonly Func<string, bool> fileExists;
+        private readonly IStateStore store;
 
-        public KillSwitch(IFirewall firewall, Func<IEnumerable<ProcessEntry>> getProcesses, Func<string, bool> fileExists)
+        public KillSwitch(IFirewall firewall, Func<IEnumerable<ProcessEntry>> getProcesses, Func<string, bool> fileExists,
+                          IStateStore store)
         {
             this.firewall = firewall;
             this.getProcesses = getProcesses;
             this.fileExists = fileExists;
+            this.store = store;
         }
 
-        public static KillSwitch CreateDefault() => new KillSwitch(new ComFirewall(), GetWmiProcesses, File.Exists);
+        public static KillSwitch CreateDefault() =>
+            new KillSwitch(new ComFirewall(), GetWmiProcesses, File.Exists, new FileStateStore());
 
         // ---------- Pure logic ----------
 
@@ -222,7 +232,17 @@ namespace Sveto4
             return result;
         }
 
-        private static string ClassifyLeak(RuleProps r)
+        /// <summary>
+        /// True when system rules must be disabled (kill switch on, blocking enabled, leaks open)
+        /// or restored (kill switch off or blocking disabled, but some rules are still disabled by us).
+        /// </summary>
+        public static bool NeedsLeakReconcile(KsState s)
+        {
+            var shouldBlock = s.Mode != KsMode.Off && s.BlockLeaks;
+            return shouldBlock ? s.Leaks.Count > 0 : s.DisabledLeaks.Count > 0;
+        }
+
+        public static string ClassifyLeak(RuleProps r)
         {
             var svchost = (r.ApplicationName ?? "").EndsWith("svchost.exe", StringComparison.OrdinalIgnoreCase);
             var service = r.ServiceName ?? "";
@@ -274,7 +294,9 @@ namespace Sveto4
         public void ReadRules(KsState s)
         {
             ApplyRules(s, firewall.GetRules(Prefix));
-            s.Leaks = FindLeaks(firewall.GetEnabledOutboundAllowRules());
+            s.Leaks = FindLeaks(firewall.GetOutboundAllowRules().Where(r => r.Enabled));
+            s.DisabledLeaks = store.LoadDisabledRules();
+            s.BlockLeaks = store.BlockSystemLeaks;
         }
 
         public static void ReadAdapters(KsState s)
@@ -292,6 +314,53 @@ namespace Sveto4
         {
             foreach (var profile in Firewall.Profiles)
                 firewall.SetOutboundBlocked(profile, block);
+
+            if (!block) RestoreSystemLeaks();
+            else if (store.BlockSystemLeaks) BlockSystemLeaks();
+        }
+
+        /// <param name="killSwitchActive">Kill switch is on (fully or partially).</param>
+        public void SetBlockLeaks(bool on, bool killSwitchActive)
+        {
+            store.BlockSystemLeaks = on;
+            if (!on) RestoreSystemLeaks();
+            else if (killSwitchActive) BlockSystemLeaks();
+        }
+
+        /// <summary>Brings system rules in line with the state (self-healing after external changes).</summary>
+        public void ReconcileLeaks(KsState s)
+        {
+            if (s.Mode != KsMode.Off && s.BlockLeaks) BlockSystemLeaks();
+            else RestoreSystemLeaks();
+        }
+
+        /// <summary>Disables enabled leak rules and remembers them for restoring.</summary>
+        private void BlockSystemLeaks()
+        {
+            var open = FindLeaks(firewall.GetOutboundAllowRules().Where(r => r.Enabled));
+            if (open.Count == 0) return;
+
+            // Save first: if disabling fails halfway, restoring still knows every candidate.
+            var records = store.LoadDisabledRules();
+            foreach (var leak in open)
+                if (!records.Any(r => r.Kind == leak.Kind && r.RuleName == leak.RuleName))
+                    records.Add(leak);
+            store.SaveDisabledRules(records);
+
+            firewall.SetOutboundAllowEnabledWhere(r => r.Enabled && ClassifyLeak(r) != null, false);
+            Log.Info("Disabled system rules: " + string.Join("; ", open.Select(l => l.RuleName)));
+        }
+
+        /// <summary>Re-enables only the rules this app disabled.</summary>
+        private void RestoreSystemLeaks()
+        {
+            var records = store.LoadDisabledRules();
+            if (records.Count == 0) return;
+
+            firewall.SetOutboundAllowEnabledWhere(
+                r => !r.Enabled && records.Any(rec => rec.Kind == ClassifyLeak(r) && rec.RuleName == r.Name), true);
+            store.SaveDisabledRules(new List<LeakInfo>());
+            Log.Info("Restored system rules: " + string.Join("; ", records.Select(l => l.RuleName)));
         }
 
         public void SetLan(bool on)

@@ -35,9 +35,28 @@ namespace Sveto4.Tests
 
         public void AddOutboundAllow(RuleSpec spec) => Rules.Add(spec);
 
-        /// <summary>System rules returned as enabled outbound Allow.</summary>
+        /// <summary>System outbound Allow rules (own KS rules are not mirrored here).</summary>
         public readonly List<RuleProps> SystemRules = new List<RuleProps>();
 
-        public List<RuleProps> GetEnabledOutboundAllowRules() => SystemRules.ToList();
+        public List<RuleProps> GetOutboundAllowRules() =>
+            SystemRules.Select(r => new RuleProps
+            {
+                Name = r.Name, Enabled = r.Enabled, ApplicationName = r.ApplicationName,
+                ServiceName = r.ServiceName, Protocol = r.Protocol, RemotePorts = r.RemotePorts,
+            }).ToList();
+
+        public void SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled)
+        {
+            foreach (var r in SystemRules.Where(match).ToList())
+                r.Enabled = enabled;
+        }
+    }
+
+    internal sealed class FakeStore : IStateStore
+    {
+        public List<LeakInfo> Disabled = new List<LeakInfo>();
+        public List<LeakInfo> LoadDisabledRules() => Disabled.ToList();
+        public void SaveDisabledRules(List<LeakInfo> rules) => Disabled = rules.ToList();
+        public bool BlockSystemLeaks { get; set; } = true;
     }
 }

@@ -13,7 +13,7 @@ namespace Sveto4.Tests
             new ProcessEntry { Pid = 12, ParentPid = 10, Name = "xray.exe", ExePath = @"C:\Happ\core\xray.exe" },
         };
 
-        private KillSwitch Create() => new KillSwitch(fw, () => processes, path => true);
+        private KillSwitch Create() => new KillSwitch(fw, () => processes, path => true, new FakeStore());
 
         private string[] RuleNames() => fw.Rules.Select(r => r.Name).OrderBy(n => n).ToArray();
 

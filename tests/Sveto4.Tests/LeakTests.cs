@@ -9,24 +9,24 @@ namespace Sveto4.Tests
         // Real property values of built-in Windows rules (names are localized, properties are not).
         internal static RuleProps Dns(string name = "Core Networking - DNS (UDP-Out)") => new RuleProps
         {
-            Name = name, ApplicationName = @"%SystemRoot%\system32\svchost.exe", ServiceName = "dnscache",
+            Name = name, Enabled = true, ApplicationName = @"%SystemRoot%\system32\svchost.exe", ServiceName = "dnscache",
             Protocol = 17, RemotePorts = "53",
         };
 
-        private static RuleProps Ipv6 => new RuleProps
+        internal static RuleProps Ipv6 => new RuleProps
         {
-            Name = "Core Networking - IPv6 (IPv6-Out)", ApplicationName = "System", Protocol = 41, RemotePorts = "*",
+            Name = "Core Networking - IPv6 (IPv6-Out)", Enabled = true, ApplicationName = "System", Protocol = 41, RemotePorts = "*",
         };
 
-        private static RuleProps Teredo => new RuleProps
+        internal static RuleProps Teredo => new RuleProps
         {
-            Name = "Core Networking - Teredo (UDP-Out)", ApplicationName = @"%SystemRoot%\system32\svchost.exe",
+            Name = "Core Networking - Teredo (UDP-Out)", Enabled = true, ApplicationName = @"%SystemRoot%\system32\svchost.exe",
             ServiceName = "iphlpsvc", Protocol = 17, RemotePorts = "*",
         };
 
-        private static RuleProps IpHttps => new RuleProps
+        internal static RuleProps IpHttps => new RuleProps
         {
-            Name = "Core Networking - IPHTTPS (TCP-Out)", ApplicationName = @"%SystemRoot%\system32\svchost.exe",
+            Name = "Core Networking - IPHTTPS (TCP-Out)", Enabled = true, ApplicationName = @"%SystemRoot%\system32\svchost.exe",
             ServiceName = "iphlpsvc", Protocol = 6, RemotePorts = "IPHTTPSOut",
         };
 
@@ -87,7 +87,7 @@ namespace Sveto4.Tests
         {
             var fw = new FakeFirewall();
             fw.SystemRules.Add(Dns());
-            var ks = new KillSwitch(fw, () => new ProcessEntry[0], p => true);
+            var ks = new KillSwitch(fw, () => new ProcessEntry[0], p => true, new FakeStore());
 
             var s = new KsState();
             ks.ReadRules(s);

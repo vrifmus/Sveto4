@@ -31,6 +31,7 @@ namespace Sveto4
         private readonly MenuItem miLeaks = new MenuItem { Visible = false };
         private readonly MenuItem miLan = new MenuItem("Allow LAN");
         private readonly MenuItem miNat = new MenuItem("Allow NAT (WSL)");
+        private readonly MenuItem miBlockLeaks = new MenuItem("Block system leaks");
         private readonly MenuItem miInterfaces = new MenuItem("Interfaces");
         private readonly MenuItem miRules = new MenuItem("Rules");
         private readonly System.Windows.Forms.Timer pollTimer = new System.Windows.Forms.Timer { Interval = PollIntervalMs };
@@ -45,6 +46,7 @@ namespace Sveto4
         private bool forceFullRefresh;
         private int generation;
         private int tick;
+        private DateTime lastReconcile = DateTime.MinValue;
 
         private Color currentColor = Yellow;
         private Color animFrom;
@@ -60,6 +62,12 @@ namespace Sveto4
             miOff.Click += (s, e) => Run("Turn OFF", () => ks.SetMode(false));
             miLan.Click += (s, e) => { var on = !state.Lan; Run("LAN " + on, () => ks.SetLan(on)); };
             miNat.Click += (s, e) => { var on = !state.Nat; Run("NAT " + on, () => ks.SetNat(on)); };
+            miBlockLeaks.Click += (s, e) =>
+            {
+                var on = !state.BlockLeaks;
+                var active = state.Mode != KsMode.Off;
+                Run("Block system leaks " + on, () => ks.SetBlockLeaks(on, active));
+            };
 
             menu.MenuItems.AddRange(new[]
             {
@@ -70,6 +78,7 @@ namespace Sveto4
                 new MenuItem("-"),
                 miLan,
                 miNat,
+                miBlockLeaks,
                 miInterfaces,
                 miRules,
                 new MenuItem("-"),
@@ -195,7 +204,18 @@ namespace Sveto4
             {
                 polling = false;
             }
-            if (!busy) ApplyState();
+            if (busy) return;
+            ApplyState();
+
+            // Self-healing: Windows updates or policies may re-enable system rules (or the
+            // kill switch may be turned off outside the app). Retry at most every 5 minutes.
+            if (state.RulesLoaded && KillSwitch.NeedsLeakReconcile(state)
+                && DateTime.UtcNow - lastReconcile > TimeSpan.FromMinutes(5))
+            {
+                lastReconcile = DateTime.UtcNow;
+                var snapshot = state;
+                Run("Reconcile system rules", () => ks.ReconcileLeaks(snapshot));
+            }
         }
 
         /// <summary>Reads the state off the UI thread. Returns null on failure (e.g. right after wake-up).</summary>
@@ -232,6 +252,8 @@ namespace Sveto4
         private void UpdateMenu()
         {
             var on = state.Mode != KsMode.Off;
+            miBlockLeaks.Checked = state.BlockLeaks;
+            miBlockLeaks.Enabled = state.RulesLoaded;
             miPartial.Visible = state.Mode == KsMode.Partial;
             miPartial.Text = "⚠ Partially on. Not blocked: " + state.NotBlocked;
             miToggle.Text = state.Mode == KsMode.On ? "Turn OFF"
@@ -254,15 +276,34 @@ namespace Sveto4
         private void BuildLeaksMenu(bool on)
         {
             miLeaks.MenuItems.Clear();
-            miLeaks.Visible = on && state.Leaks.Count > 0;
-            if (!miLeaks.Visible) return;
+            miLeaks.Visible = false;
+            if (!on) return;
 
-            miLeaks.Text = $"⚠ Possible leaks ({state.Leaks.Count})";
-            foreach (var leak in state.Leaks)
+            if (state.Leaks.Count > 0)
+            {
+                miLeaks.Visible = true;
+                miLeaks.Text = $"⚠ Possible leaks ({state.Leaks.Count})";
+                AddLeakItems(state.Leaks);
+                miLeaks.MenuItems.Add(new MenuItem("These Windows rules allow traffic outside the VPN.") { Enabled = false });
+                miLeaks.MenuItems.Add(new MenuItem(state.BlockLeaks
+                    ? "They could not be disabled, see the log."
+                    : "Turn on \"Block system leaks\" to disable them.") { Enabled = false });
+            }
+            else if (state.DisabledLeaks.Count > 0)
+            {
+                miLeaks.Visible = true;
+                miLeaks.Text = $"System leaks blocked ({state.DisabledLeaks.Count})";
+                AddLeakItems(state.DisabledLeaks);
+                miLeaks.MenuItems.Add(new MenuItem("These Windows rules are disabled while the kill switch is on.") { Enabled = false });
+                miLeaks.MenuItems.Add(new MenuItem("They are restored on Turn OFF / Reset ALL.") { Enabled = false });
+            }
+        }
+
+        private void AddLeakItems(IEnumerable<LeakInfo> leaks)
+        {
+            foreach (var leak in leaks)
                 miLeaks.MenuItems.Add(new MenuItem($"{leak.Kind}: {leak.RuleName}") { Enabled = false });
             miLeaks.MenuItems.Add(new MenuItem("-"));
-            miLeaks.MenuItems.Add(new MenuItem("These Windows rules allow traffic outside the VPN.") { Enabled = false });
-            miLeaks.MenuItems.Add(new MenuItem("Disable them in Windows Firewall to close the leak.") { Enabled = false });
         }
 
         private void BuildInterfacesMenu()

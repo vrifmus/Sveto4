@@ -33,6 +33,7 @@ namespace Sveto4
     internal sealed class RuleProps
     {
         public string Name;
+        public bool Enabled;
         public string ApplicationName;
         public string ServiceName;
         /// <summary>IANA protocol number: 6 = TCP, 17 = UDP, 41 = IPv6, 256 = any.</summary>
@@ -54,8 +55,10 @@ namespace Sveto4
         /// <summary>Removes every rule whose name matches the predicate.</summary>
         void RemoveWhere(Func<string, bool> match);
         void AddOutboundAllow(RuleSpec spec);
-        /// <summary>All enabled outbound Allow rules.</summary>
-        List<RuleProps> GetEnabledOutboundAllowRules();
+        /// <summary>All outbound Allow rules, enabled or not.</summary>
+        List<RuleProps> GetOutboundAllowRules();
+        /// <summary>Enables or disables every outbound Allow rule matching the predicate.</summary>
+        void SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled);
     }
 
     internal static class Firewall
@@ -168,24 +171,41 @@ namespace Sveto4
             policy.Rules.Add(rule);
         }
 
-        public List<RuleProps> GetEnabledOutboundAllowRules()
+        public List<RuleProps> GetOutboundAllowRules()
         {
             var result = new List<RuleProps>();
             dynamic policy = NewPolicy();
             foreach (dynamic rule in policy.Rules)
             {
-                if (!(bool)rule.Enabled || (int)rule.Direction != DirectionOut || (int)rule.Action != ActionAllow)
-                    continue;
-                result.Add(new RuleProps
-                {
-                    Name = rule.Name,
-                    ApplicationName = rule.ApplicationName,
-                    ServiceName = rule.ServiceName,
-                    Protocol = (int)rule.Protocol,
-                    RemotePorts = rule.RemotePorts,
-                });
+                var props = ToOutboundAllowProps(rule);
+                if (props != null) result.Add(props);
             }
             return result;
+        }
+
+        public void SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled)
+        {
+            dynamic policy = NewPolicy();
+            foreach (dynamic rule in policy.Rules)
+            {
+                RuleProps props = ToOutboundAllowProps(rule);
+                if (props != null && match(props)) rule.Enabled = enabled;
+            }
+        }
+
+        /// <summary>Returns properties of an outbound Allow rule, or null for other rules.</summary>
+        private static RuleProps ToOutboundAllowProps(dynamic rule)
+        {
+            if ((int)rule.Direction != DirectionOut || (int)rule.Action != ActionAllow) return null;
+            return new RuleProps
+            {
+                Name = rule.Name,
+                Enabled = (bool)rule.Enabled,
+                ApplicationName = rule.ApplicationName,
+                ServiceName = rule.ServiceName,
+                Protocol = (int)rule.Protocol,
+                RemotePorts = rule.RemotePorts,
+            };
         }
 
         private static object NewPolicy() =>
