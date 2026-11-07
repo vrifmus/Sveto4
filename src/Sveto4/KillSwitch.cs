@@ -99,6 +99,22 @@ namespace Sveto4
         /// <summary>"Block system leaks" setting.</summary>
         public bool BlockLeaks = true;
 
+        /// <summary>Copy with its own collections (adapters are shared: they are never modified).</summary>
+        public KsState Clone() => new KsState
+        {
+            Mode = Mode,
+            NotBlocked = NotBlocked,
+            RulesLoaded = RulesLoaded,
+            Rules = new List<RuleInfo>(Rules),
+            Interfaces = new HashSet<string>(Interfaces, StringComparer.OrdinalIgnoreCase),
+            Lan = Lan,
+            Nat = Nat,
+            Adapters = Adapters,
+            Leaks = new List<LeakInfo>(Leaks),
+            DisabledLeaks = new List<LeakInfo>(DisabledLeaks),
+            BlockLeaks = BlockLeaks,
+        };
+
         public void CopyRulesFrom(KsState other)
         {
             RulesLoaded = other.RulesLoaded;
@@ -200,6 +216,99 @@ namespace Sveto4
             if (present.Count == 0) return IconState.AdapterMissing;
             return present.Any(a => a.IsUp) ? IconState.Connected : IconState.Disconnected;
         }
+
+        // ---------- Predicted state (shown immediately, corrected by the next read) ----------
+
+        public static KsState PredictMode(KsState s, bool block)
+        {
+            var n = s.Clone();
+            n.Mode = block ? KsMode.On : KsMode.Off;
+            n.NotBlocked = "";
+            if (!block) MoveLeaks(n.DisabledLeaks, n.Leaks);
+            else if (n.BlockLeaks) MoveLeaks(n.Leaks, n.DisabledLeaks);
+            return n;
+        }
+
+        public static KsState PredictBlockLeaks(KsState s, bool on, bool killSwitchActive)
+        {
+            var n = s.Clone();
+            n.BlockLeaks = on;
+            if (!on) MoveLeaks(n.DisabledLeaks, n.Leaks);
+            else if (killSwitchActive) MoveLeaks(n.Leaks, n.DisabledLeaks);
+            return n;
+        }
+
+        public static KsState PredictLan(KsState s, bool on)
+        {
+            var n = s.Clone();
+            n.Lan = on;
+            foreach (var subnet in LanSubnets.Keys) SetRule(n, LanPrefix + subnet, on);
+            return n;
+        }
+
+        public static KsState PredictNat(KsState s, bool on)
+        {
+            var n = s.Clone();
+            n.Nat = on;
+            SetRule(n, NatRule, on);
+            return n;
+        }
+
+        /// <remarks>Client process rules (KS-App-*) are not predicted: they depend on running processes.</remarks>
+        public static KsState PredictSelect(KsState s, string iface)
+        {
+            var n = s.Clone();
+            n.Interfaces.Add(iface);
+            SetRule(n, AllowPrefix + iface, true);
+            return n;
+        }
+
+        public static KsState PredictDeselect(KsState s, string iface, ICollection<string> remaining)
+        {
+            var n = s.Clone();
+            n.Interfaces.Remove(iface);
+            RemoveRules(n, r => string.Equals(r, AllowPrefix + iface, StringComparison.OrdinalIgnoreCase));
+            var app = MatchApp(iface);
+            if (app != null && !remaining.Any(i => MatchApp(i) == app))
+                RemoveRules(n, r => r.StartsWith(AppPrefix + app + "-", StringComparison.OrdinalIgnoreCase));
+            return n;
+        }
+
+        public static KsState PredictClear(KsState s)
+        {
+            var n = s.Clone();
+            n.Interfaces.Clear();
+            RemoveRules(n, r => r.StartsWith(AllowPrefix, StringComparison.OrdinalIgnoreCase)
+                             || r.StartsWith(AppPrefix, StringComparison.OrdinalIgnoreCase));
+            return n;
+        }
+
+        public static KsState PredictReset(KsState s)
+        {
+            var n = PredictMode(s, false);
+            n.Interfaces.Clear();
+            n.Lan = false;
+            n.Nat = false;
+            n.Rules = new List<RuleInfo>();
+            return n;
+        }
+
+        private static void MoveLeaks(List<LeakInfo> from, List<LeakInfo> to)
+        {
+            foreach (var leak in from)
+                if (!to.Any(l => l.Kind == leak.Kind && l.RuleName == leak.RuleName))
+                    to.Add(leak);
+            from.Clear();
+        }
+
+        private static void SetRule(KsState n, string name, bool enabled)
+        {
+            RemoveRules(n, r => string.Equals(r, name, StringComparison.OrdinalIgnoreCase));
+            n.Rules.Add(new RuleInfo(name, enabled));
+        }
+
+        private static void RemoveRules(KsState n, Func<string, bool> match) =>
+            n.Rules.RemoveAll(r => match(r.Name));
 
         public static bool IsSystemAdapter(string description) =>
             SystemAdapterMarkers.Any(m => (description ?? "").IndexOf(m, StringComparison.OrdinalIgnoreCase) >= 0);

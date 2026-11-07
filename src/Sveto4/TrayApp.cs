@@ -61,14 +61,23 @@ namespace Sveto4
             ui = SynchronizationContext.Current;
 
             miToggle.Click += (s, e) => OnToggle();
-            miOff.Click += (s, e) => Run("Turn OFF", () => ks.SetMode(false));
-            miLan.Click += (s, e) => { var on = !state.Lan; Run("LAN " + on, () => ks.SetLan(on)); };
-            miNat.Click += (s, e) => { var on = !state.Nat; Run("NAT " + on, () => ks.SetNat(on)); };
+            miOff.Click += (s, e) => SetMode(false);
+            miLan.Click += (s, e) =>
+            {
+                var on = !state.Lan;
+                Run("LAN " + on, () => ks.SetLan(on), st => KillSwitch.PredictLan(st, on));
+            };
+            miNat.Click += (s, e) =>
+            {
+                var on = !state.Nat;
+                Run("NAT " + on, () => ks.SetNat(on), st => KillSwitch.PredictNat(st, on));
+            };
             miBlockLeaks.Click += (s, e) =>
             {
                 var on = !state.BlockLeaks;
                 var active = state.Mode != KsMode.Off;
-                Run("Block system leaks " + on, () => ks.SetBlockLeaks(on, active));
+                Run("Block system leaks " + on, () => ks.SetBlockLeaks(on, active),
+                    st => KillSwitch.PredictBlockLeaks(st, on, active));
             };
 
             menu.MenuItems.AddRange(new[]
@@ -85,7 +94,7 @@ namespace Sveto4
                 miBlockLeaks,
                 miLeaks,
                 new MenuItem("-"),
-                new MenuItem("Reset ALL", (s, e) => Run("Reset ALL", ks.ResetAll)),
+                new MenuItem("Reset ALL", (s, e) => Run("Reset ALL", ks.ResetAll, KillSwitch.PredictReset)),
                 new MenuItem("-"),
                 new MenuItem("Exit", (s, e) => ExitApp()),
             });
@@ -117,7 +126,7 @@ namespace Sveto4
             ApplyState();
 
             if (autoEnable && state.Mode != KsMode.On)
-                Run("Auto-enable", () => ks.SetMode(true));
+                Run("Auto-enable", () => ks.SetMode(true), st => KillSwitch.PredictMode(st, true));
 
             pollTimer.Start();
         }
@@ -156,31 +165,36 @@ namespace Sveto4
 
         // ---------- Actions and refresh ----------
 
-        private void OnToggle()
-        {
-            if (state.Mode == KsMode.On) Run("Turn OFF", () => ks.SetMode(false));
-            else Run("Turn ON", () => ks.SetMode(true));
-        }
+        private void OnToggle() => SetMode(state.Mode != KsMode.On);
+
+        private void SetMode(bool block) =>
+            Run(block ? "Turn ON" : "Turn OFF", () => ks.SetMode(block), st => KillSwitch.PredictMode(st, block));
 
         private void OnInterfaceClick(string iface)
         {
             if (state.Interfaces.Contains(iface))
             {
                 var remaining = state.Interfaces.Where(i => !string.Equals(i, iface, StringComparison.OrdinalIgnoreCase)).ToList();
-                Run("Deselect " + iface, () => ks.DeselectInterface(iface, remaining));
+                Run("Deselect " + iface, () => ks.DeselectInterface(iface, remaining),
+                    st => KillSwitch.PredictDeselect(st, iface, remaining));
             }
             else
             {
-                Run("Select " + iface, () => ks.SelectInterface(iface));
+                Run("Select " + iface, () => ks.SelectInterface(iface), st => KillSwitch.PredictSelect(st, iface));
             }
         }
 
-        /// <summary>Runs a firewall action in the background, then re-reads the full state.</summary>
-        private async void Run(string what, Action action)
+        /// <summary>
+        /// Runs a firewall action in the background, then re-reads the full state.
+        /// <paramref name="predict"/> applies the expected result immediately, so a menu reopened
+        /// during the action already shows it; the re-read corrects it if the action failed.
+        /// </summary>
+        private async void Run(string what, Action action, Func<KsState, KsState> predict = null)
         {
             if (busy) return;
             busy = true;
             generation++;
+            if (predict != null) state = predict(state);
             AnimateTo(Yellow);
 
             try
@@ -326,7 +340,7 @@ namespace Sveto4
             miInterfaces.Text = selected.Count > 0 ? $"Interfaces ({selected.Count})" : "Interfaces";
             miInterfaces.MenuItems.Clear();
 
-            miInterfaces.MenuItems.Add(new MenuItem("None", (s, e) => Run("Clear interfaces", ks.ClearInterfaces))
+            miInterfaces.MenuItems.Add(new MenuItem("None", (s, e) => Run("Clear interfaces", ks.ClearInterfaces, KillSwitch.PredictClear))
             {
                 Checked = selected.Count == 0,
             });
@@ -340,13 +354,14 @@ namespace Sveto4
             {
                 var iface = name;
                 var isSelected = selected.Contains(iface);
-                // Selected but absent or disconnected: grayed out with a warning sign, as in the legacy version.
-                // It can be cleared with "None".
-                var missing = isSelected && !state.Adapters.Any(a => a.IsUp && string.Equals(a.Name, iface, StringComparison.OrdinalIgnoreCase));
-                miInterfaces.MenuItems.Add(new MenuItem(missing ? iface + Warn : iface, (s, e) => OnInterfaceClick(iface))
+                // Selected but absent or disconnected: marked on the right; clicking it deselects.
+                var adapter = state.Adapters.FirstOrDefault(a => string.Equals(a.Name, iface, StringComparison.OrdinalIgnoreCase));
+                var mark = !isSelected || (adapter != null && adapter.IsUp) ? ""
+                         : adapter == null ? Warn + " Not found"
+                         : Warn + " Disconnected";
+                miInterfaces.MenuItems.Add(new MenuItem(iface + mark, (s, e) => OnInterfaceClick(iface))
                 {
                     Checked = isSelected,
-                    Enabled = !missing,
                 });
             }
         }
