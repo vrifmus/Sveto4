@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -24,6 +25,8 @@ namespace Sveto4
         private const int AnimSteps = 8;
         /// <summary>Warning sign, right-aligned: native menus align text after a tab to the right edge.</summary>
         private const string Warn = "\t⚠";
+        private const int ShellTooltipMax = 127;  // NOTIFYICONDATA.szTip is 128 chars incl. terminator
+        private const int LegacyTooltipMax = 63;  // NotifyIcon.Text limit in .NET Framework
 
         private readonly NotifyIcon tray = new NotifyIcon();
         private readonly ContextMenu menu = new ContextMenu();
@@ -49,6 +52,7 @@ namespace Sveto4
         private int generation;
         private int tick;
         private DateTime lastReconcile = DateTime.MinValue;
+        private string lastTooltip;
 
         private Color currentColor = Yellow;
         private Color animFrom;
@@ -383,9 +387,35 @@ namespace Sveto4
 
         private void UpdateTooltip()
         {
-            var mode = state.Mode == KsMode.On ? "ON" : state.Mode == KsMode.Partial ? "PARTIAL" : "OFF";
-            var text = $"Kill switch: {mode}\nLAN: {(state.Lan ? "ON" : "OFF")}  NAT: {(state.Nat ? "ON" : "OFF")}\nInterfaces: {state.Interfaces.Count}";
-            tray.Text = text.Length > 63 ? text.Substring(0, 63) : text; // NotifyIcon limit
+            var text = KillSwitch.FormatTooltip(state, ShellTooltipMax);
+            if (text == lastTooltip) return;
+            lastTooltip = text;
+            SetTooltip(text);
+        }
+
+        /// <summary>
+        /// WinForms on .NET Framework limits NotifyIcon.Text to 63 chars, while Windows allows 127.
+        /// Writes the private "text" field and refreshes the icon via reflection; falls back to the 63-char limit.
+        /// </summary>
+        private void SetTooltip(string text)
+        {
+            try
+            {
+                var type = typeof(NotifyIcon);
+                var field = type.GetField("text", BindingFlags.NonPublic | BindingFlags.Instance);
+                var update = type.GetMethod("UpdateIcon", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null && update != null)
+                {
+                    field.SetValue(tray, text);
+                    if (tray.Visible) update.Invoke(tray, new object[] { true });
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "tooltip");
+            }
+            tray.Text = text.Length > LegacyTooltipMax ? text.Substring(0, LegacyTooltipMax) : text;
         }
 
         private Color TargetColor()

@@ -217,6 +217,39 @@ namespace Sveto4
             return present.Any(a => a.IsUp) ? IconState.Connected : IconState.Disconnected;
         }
 
+        // ---------- Tray tooltip ----------
+
+        /// <summary>Multi-line tooltip; the interface list is shortened with "…" to fit <paramref name="maxLength"/>.</summary>
+        public static string FormatTooltip(KsState s, int maxLength)
+        {
+            var mode = s.Mode == KsMode.On ? "ON" : s.Mode == KsMode.Partial ? "PARTIAL" : "OFF";
+            string leaks;
+            if (!s.BlockLeaks) leaks = "OFF";
+            else if (s.Mode != KsMode.Off && s.Leaks.Count > 0) leaks = $"ON, {s.Leaks.Count} open";
+            else if (s.DisabledLeaks.Count > 0) leaks = $"ON ({s.DisabledLeaks.Count})";
+            else leaks = "ON";
+
+            var head = string.Join("\n",
+                "Sveto4",
+                "Kill switch: " + mode,
+                "LAN: " + OnOff(s.Lan),
+                "NAT (WSL): " + OnOff(s.Nat),
+                "Block system leaks: " + leaks,
+                "Interfaces: ");
+
+            var interfaces = s.Interfaces.Count == 0
+                ? "none"
+                : string.Join(", ", s.Interfaces.OrderBy(i => i, StringComparer.OrdinalIgnoreCase));
+
+            var room = maxLength - head.Length;
+            if (interfaces.Length > room)
+                interfaces = room > 1 ? interfaces.Substring(0, room - 1) + "…" : "";
+            var text = head + interfaces;
+            return text.Length > maxLength ? text.Substring(0, maxLength) : text;
+        }
+
+        private static string OnOff(bool on) => on ? "ON" : "OFF";
+
         // ---------- Predicted state (shown immediately, corrected by the next read) ----------
 
         public static KsState PredictMode(KsState s, bool block)
