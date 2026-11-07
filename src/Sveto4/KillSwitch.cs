@@ -404,8 +404,16 @@ namespace Sveto4
         private static void RemoveRules(KsState n, Func<string, bool> match) =>
             n.Rules.RemoveAll(r => match(r.Name));
 
-        public static bool IsSystemAdapter(string description) =>
-            SystemAdapterMarkers.Any(m => (description ?? "").IndexOf(m, StringComparison.OrdinalIgnoreCase) >= 0);
+        /// <summary>
+        /// Internal Hyper-V links to WSL and the Default Switch VMs: their internet traffic leaves via the
+        /// host's own adapters. Matched by name, because an External switch adapter has the same description
+        /// but carries the host's real connection.
+        /// </summary>
+        private static readonly string[] InternalVirtualAdapterPrefixes = { "vEthernet (WSL", "vEthernet (Default Switch)" };
+
+        public static bool IsSystemAdapter(string name, string description) =>
+            SystemAdapterMarkers.Any(m => (description ?? "").IndexOf(m, StringComparison.OrdinalIgnoreCase) >= 0)
+            || InternalVirtualAdapterPrefixes.Any(p => (name ?? "").StartsWith(p, StringComparison.OrdinalIgnoreCase));
 
         public const string LeakDns = "DNS";
         public const string LeakIpv6Tunnel = "IPv6 tunnel (6to4/ISATAP)";

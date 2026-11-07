@@ -145,7 +145,7 @@ namespace Sveto4
                 .Where(n => n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
                 .Select(n => new AdapterInfo(n.Name, n.Description ?? "",
                     n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up,
-                    KillSwitch.IsSystemAdapter(n.Description)))
+                    KillSwitch.IsSystemAdapter(n.Name, n.Description)))
                 .ToList();
     }
 }
