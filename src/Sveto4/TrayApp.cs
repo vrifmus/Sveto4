@@ -74,13 +74,14 @@ namespace Sveto4
                 miPartial,
                 miToggle,
                 miOff,
-                miLeaks,
                 new MenuItem("-"),
                 miLan,
                 miNat,
-                miBlockLeaks,
                 miInterfaces,
                 miRules,
+                new MenuItem("-"),
+                miBlockLeaks,
+                miLeaks,
                 new MenuItem("-"),
                 new MenuItem("Reset ALL", (s, e) => Run("Reset ALL", ks.ResetAll)),
                 new MenuItem("-"),
@@ -255,7 +256,7 @@ namespace Sveto4
             miBlockLeaks.Checked = state.BlockLeaks;
             miBlockLeaks.Enabled = state.RulesLoaded;
             miPartial.Visible = state.Mode == KsMode.Partial;
-            miPartial.Text = "⚠ Partially on. Not blocked: " + state.NotBlocked;
+            miPartial.Text = "Partially on. Not blocked: " + state.NotBlocked;
             miToggle.Text = state.Mode == KsMode.On ? "Turn OFF"
                           : state.Mode == KsMode.Partial ? "Turn ON (all profiles)"
                           : "Turn ON";
@@ -282,7 +283,7 @@ namespace Sveto4
             if (state.Leaks.Count > 0)
             {
                 miLeaks.Visible = true;
-                miLeaks.Text = $"⚠ Possible leaks ({state.Leaks.Count})";
+                miLeaks.Text = $"Possible leaks ({state.Leaks.Count})";
                 AddLeakItems(state.Leaks);
                 miLeaks.MenuItems.Add(new MenuItem("These Windows rules allow traffic outside the VPN.") { Enabled = false });
                 miLeaks.MenuItems.Add(new MenuItem(state.BlockLeaks
