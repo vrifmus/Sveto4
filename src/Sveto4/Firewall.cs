@@ -29,6 +29,17 @@ namespace Sveto4
         public string RemoteAddresses;
     }
 
+    /// <summary>Properties of an existing rule, used to recognize system rules regardless of UI language.</summary>
+    internal sealed class RuleProps
+    {
+        public string Name;
+        public string ApplicationName;
+        public string ServiceName;
+        /// <summary>IANA protocol number: 6 = TCP, 17 = UDP, 41 = IPv6, 256 = any.</summary>
+        public int Protocol;
+        public string RemotePorts;
+    }
+
     /// <summary>Windows Firewall operations used by the kill switch. Replaced by a fake in tests.</summary>
     internal interface IFirewall
     {
@@ -43,6 +54,8 @@ namespace Sveto4
         /// <summary>Removes every rule whose name matches the predicate.</summary>
         void RemoveWhere(Func<string, bool> match);
         void AddOutboundAllow(RuleSpec spec);
+        /// <summary>All enabled outbound Allow rules.</summary>
+        List<RuleProps> GetEnabledOutboundAllowRules();
     }
 
     internal static class Firewall
@@ -153,6 +166,26 @@ namespace Sveto4
 
             dynamic policy = NewPolicy();
             policy.Rules.Add(rule);
+        }
+
+        public List<RuleProps> GetEnabledOutboundAllowRules()
+        {
+            var result = new List<RuleProps>();
+            dynamic policy = NewPolicy();
+            foreach (dynamic rule in policy.Rules)
+            {
+                if (!(bool)rule.Enabled || (int)rule.Direction != DirectionOut || (int)rule.Action != ActionAllow)
+                    continue;
+                result.Add(new RuleProps
+                {
+                    Name = rule.Name,
+                    ApplicationName = rule.ApplicationName,
+                    ServiceName = rule.ServiceName,
+                    Protocol = (int)rule.Protocol,
+                    RemotePorts = rule.RemotePorts,
+                });
+            }
+            return result;
         }
 
         private static object NewPolicy() =>

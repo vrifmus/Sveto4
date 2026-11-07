@@ -58,6 +58,20 @@ namespace Sveto4
         public bool OutboundBlocked { get; }
     }
 
+    /// <summary>A system Allow rule that lets traffic bypass the kill switch.</summary>
+    internal sealed class LeakInfo
+    {
+        public LeakInfo(string kind, string ruleName)
+        {
+            Kind = kind;
+            RuleName = ruleName;
+        }
+
+        /// <summary>Short description, e.g. "DNS".</summary>
+        public string Kind { get; }
+        public string RuleName { get; }
+    }
+
     internal sealed class ProcessEntry
     {
         public uint Pid;
@@ -78,10 +92,13 @@ namespace Sveto4
         public bool Lan;
         public bool Nat;
         public List<AdapterInfo> Adapters = new List<AdapterInfo>();
+        /// <summary>System rules that bypass the kill switch (warning only, not changed).</summary>
+        public List<LeakInfo> Leaks = new List<LeakInfo>();
 
         public void CopyRulesFrom(KsState other)
         {
             RulesLoaded = other.RulesLoaded;
+            Leaks = other.Leaks;
             Rules = other.Rules;
             Interfaces = other.Interfaces;
             Lan = other.Lan;
@@ -181,6 +198,53 @@ namespace Sveto4
         public static string MatchApp(string iface) =>
             TargetApps.FirstOrDefault(a => iface.IndexOf(a, StringComparison.OrdinalIgnoreCase) >= 0);
 
+        public const string LeakDns = "DNS";
+        public const string LeakIpv6Tunnel = "IPv6 tunnel (6to4/ISATAP)";
+        public const string LeakTeredo = "Teredo tunnel";
+        public const string LeakIpHttps = "IP-HTTPS tunnel";
+
+        private const int ProtocolTcp = 6;
+        private const int ProtocolUdp = 17;
+        private const int ProtocolIpv6 = 41;
+
+        /// <summary>
+        /// Recognizes built-in "Core Networking" rules that let traffic bypass the kill switch.
+        /// Matching is by properties, not by name, because rule names are localized.
+        /// </summary>
+        public static List<LeakInfo> FindLeaks(IEnumerable<RuleProps> enabledOutboundAllow)
+        {
+            var result = new List<LeakInfo>();
+            foreach (var r in enabledOutboundAllow)
+            {
+                var kind = ClassifyLeak(r);
+                if (kind != null) result.Add(new LeakInfo(kind, r.Name));
+            }
+            return result;
+        }
+
+        private static string ClassifyLeak(RuleProps r)
+        {
+            var svchost = (r.ApplicationName ?? "").EndsWith("svchost.exe", StringComparison.OrdinalIgnoreCase);
+            var service = r.ServiceName ?? "";
+
+            if (svchost && service.Equals("dnscache", StringComparison.OrdinalIgnoreCase)
+                && r.Protocol == ProtocolUdp && PortsContain(r.RemotePorts, "53"))
+                return LeakDns;
+
+            if (r.Protocol == ProtocolIpv6 && string.Equals(r.ApplicationName, "System", StringComparison.OrdinalIgnoreCase))
+                return LeakIpv6Tunnel;
+
+            if (svchost && service.Equals("iphlpsvc", StringComparison.OrdinalIgnoreCase))
+            {
+                if (r.Protocol == ProtocolUdp) return LeakTeredo;
+                if (r.Protocol == ProtocolTcp) return LeakIpHttps;
+            }
+            return null;
+        }
+
+        private static bool PortsContain(string ports, string port) =>
+            (ports ?? "").Split(',').Any(p => p.Trim() == port);
+
         /// <summary>Exe paths of the client's processes and of their direct children (e.g. xray core).</summary>
         public static List<string> CollectAppPaths(IEnumerable<ProcessEntry> processes, string app)
         {
@@ -207,7 +271,11 @@ namespace Sveto4
                 Firewall.ProfileName(p), firewall.IsFirewallEnabled(p), firewall.IsOutboundBlocked(p))));
         }
 
-        public void ReadRules(KsState s) => ApplyRules(s, firewall.GetRules(Prefix));
+        public void ReadRules(KsState s)
+        {
+            ApplyRules(s, firewall.GetRules(Prefix));
+            s.Leaks = FindLeaks(firewall.GetEnabledOutboundAllowRules());
+        }
 
         public static void ReadAdapters(KsState s)
         {

@@ -34,5 +34,10 @@ namespace Sveto4.Tests
         public void RemoveWhere(Func<string, bool> match) => Rules.RemoveAll(r => match(r.Name));
 
         public void AddOutboundAllow(RuleSpec spec) => Rules.Add(spec);
+
+        /// <summary>System rules returned as enabled outbound Allow.</summary>
+        public readonly List<RuleProps> SystemRules = new List<RuleProps>();
+
+        public List<RuleProps> GetEnabledOutboundAllowRules() => SystemRules.ToList();
     }
 }

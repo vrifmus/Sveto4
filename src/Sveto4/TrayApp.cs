@@ -28,6 +28,7 @@ namespace Sveto4
         private readonly MenuItem miPartial = new MenuItem { Enabled = false, Visible = false };
         private readonly MenuItem miToggle = new MenuItem("Turn ON");
         private readonly MenuItem miOff = new MenuItem("Turn OFF (all profiles)") { Visible = false };
+        private readonly MenuItem miLeaks = new MenuItem { Visible = false };
         private readonly MenuItem miLan = new MenuItem("Allow LAN");
         private readonly MenuItem miNat = new MenuItem("Allow NAT (WSL)");
         private readonly MenuItem miInterfaces = new MenuItem("Interfaces");
@@ -65,6 +66,7 @@ namespace Sveto4
                 miPartial,
                 miToggle,
                 miOff,
+                miLeaks,
                 new MenuItem("-"),
                 miLan,
                 miNat,
@@ -246,6 +248,21 @@ namespace Sveto4
 
             BuildInterfacesMenu();
             BuildRulesMenu();
+            BuildLeaksMenu(on);
+        }
+
+        private void BuildLeaksMenu(bool on)
+        {
+            miLeaks.MenuItems.Clear();
+            miLeaks.Visible = on && state.Leaks.Count > 0;
+            if (!miLeaks.Visible) return;
+
+            miLeaks.Text = $"⚠ Possible leaks ({state.Leaks.Count})";
+            foreach (var leak in state.Leaks)
+                miLeaks.MenuItems.Add(new MenuItem($"{leak.Kind}: {leak.RuleName}") { Enabled = false });
+            miLeaks.MenuItems.Add(new MenuItem("-"));
+            miLeaks.MenuItems.Add(new MenuItem("These Windows rules allow traffic outside the VPN.") { Enabled = false });
+            miLeaks.MenuItems.Add(new MenuItem("Disable them in Windows Firewall to close the leak.") { Enabled = false });
         }
 
         private void BuildInterfacesMenu()
