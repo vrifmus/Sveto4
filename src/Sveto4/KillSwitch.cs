@@ -170,6 +170,8 @@ namespace Sveto4
             ["10.0.0.0/8"] = "10.0.0.0/255.0.0.0",
             ["172.16.0.0/12"] = "172.16.0.0/255.240.0.0",
             ["fc00::/7"] = "fc00::/7",
+            // IPv6 link-local: not routable beyond the local link, used by some LAN devices.
+            ["fe80::/10"] = "fe80::/10",
         };
 
         private static readonly string[] SystemAdapterMarkers =
@@ -308,6 +310,10 @@ namespace Sveto4
             SetRule(n, WslRule, on);
             return n;
         }
+
+        /// <summary>"Allow LAN" is on, but some subnet rules are missing (e.g. a subnet added in a newer version).</summary>
+        public static bool NeedsLanSync(KsState s) =>
+            s.Lan && LanSubnets.Keys.Any(k => !s.Rules.Any(r => string.Equals(r.Name, LanPrefix + k, StringComparison.OrdinalIgnoreCase)));
 
         /// <summary>The legacy rule is present and has to be replaced.</summary>
         public static bool NeedsNatMigration(KsState s) =>

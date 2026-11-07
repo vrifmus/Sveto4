@@ -59,6 +59,7 @@ namespace Sveto4
         private int tick;
         private DateTime lastReconcile = DateTime.MinValue;
         private DateTime lastMigration = DateTime.MinValue;
+        private DateTime lastLanSync = DateTime.MinValue;
         private DateTime lastSync = DateTime.MinValue;
         private string lastSyncSignature;
         private readonly System.Windows.Forms.Timer quickPollTimer = new System.Windows.Forms.Timer { Interval = 300 };
@@ -267,6 +268,15 @@ namespace Sveto4
                 lastMigration = DateTime.UtcNow;
                 var snapshot = state;
                 Run("Migrate NAT rule", () => ks.MigrateNatRule(snapshot), KillSwitch.PredictNatMigration);
+                return;
+            }
+
+            // "Allow LAN" is on, but a subnet added in a newer version has no rule yet.
+            if (state.RulesLoaded && KillSwitch.NeedsLanSync(state)
+                && DateTime.UtcNow - lastLanSync > TimeSpan.FromMinutes(5))
+            {
+                lastLanSync = DateTime.UtcNow;
+                Run("Sync LAN rules", () => ks.SetLan(true), st => KillSwitch.PredictLan(st, true));
                 return;
             }
 

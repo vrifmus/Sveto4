@@ -80,6 +80,38 @@ namespace Sveto4.Tests
         }
 
         [Fact]
+        public void Lan_IncludesIpv6LinkLocal()
+        {
+            Create().SetLan(true);
+            Assert.Equal("fe80::/10", fw.Find("KS-LAN-Allow-fe80::/10").RemoteAddresses);
+        }
+
+        [Fact]
+        public void LanSync_AddsSubnetMissingFromOlderVersion()
+        {
+            var ks = Create();
+            ks.SetLan(true);
+            fw.Rules.RemoveAll(r => r.Name == "KS-LAN-Allow-fe80::/10"); // created by an older version
+            var s = Read(ks);
+            Assert.True(KillSwitch.NeedsLanSync(s));
+
+            ks.SetLan(true);
+
+            Assert.False(KillSwitch.NeedsLanSync(Read(ks)));
+            Assert.Equal(KillSwitch.LanSubnets.Count, fw.Rules.Count);
+        }
+
+        [Fact]
+        public void LanSync_NotWhenLanOff()
+        {
+            var ks = Create();
+            ks.SetLan(true);
+            ks.SetLan(false);
+            fw.Rules.RemoveAll(r => r.Name == "KS-LAN-Allow-fe80::/10");
+            Assert.False(KillSwitch.NeedsLanSync(Read(ks)));
+        }
+
+        [Fact]
         public void SetWsl_HyperVRuleOnly_NoSystemProcessRule()
         {
             var ks = Create();
