@@ -398,6 +398,7 @@ namespace Sveto4
                     if (full) ks.ReadRules(s);
                     else s.CopyRulesFrom(previous);
                     ks.ReadAdapters(s);
+                    LogNewAdapters(s.Adapters);
                     return s;
                 });
             }
@@ -405,6 +406,20 @@ namespace Sveto4
             {
                 Log.Error(ex, "read state");
                 return null;
+            }
+        }
+
+        private readonly HashSet<string> seenAdapters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool adaptersKnown;
+
+        /// <summary>Logs adapters that appear after startup (runs on a worker thread).</summary>
+        private void LogNewAdapters(List<AdapterInfo> adapters)
+        {
+            lock (seenAdapters)
+            {
+                var added = KillSwitch.NewAdapters(seenAdapters, adapters);
+                if (!adaptersKnown) { adaptersKnown = true; return; } // the initial set is not interesting
+                foreach (var a in added) Log.Info("New adapter: " + KillSwitch.DescribeAdapter(a));
             }
         }
 

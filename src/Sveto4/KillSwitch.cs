@@ -417,6 +417,21 @@ namespace Sveto4
         /// </summary>
         private static readonly string[] InternalVirtualAdapterPrefixes = { "vEthernet (WSL", "vEthernet (Default Switch)" };
 
+        /// <summary>
+        /// Adapters not seen before (by name and description). Updates <paramref name="seen"/>.
+        /// Diagnostics for short-lived adapters with garbled names (AUDIT item 11).
+        /// </summary>
+        public static List<AdapterInfo> NewAdapters(HashSet<string> seen, IEnumerable<AdapterInfo> adapters) =>
+            adapters.Where(a => seen.Add(a.Name + "\n" + a.Description)).ToList();
+
+        /// <summary>Log line for an adapter; non-ASCII characters are also listed as code points.</summary>
+        public static string DescribeAdapter(AdapterInfo a)
+        {
+            var codes = string.Join(" ", (a.Name ?? "").Where(c => c > 0x7E || c < 0x20).Select(c => $"U+{(int)c:X4}"));
+            return $"'{a.Name}'" + (codes.Length > 0 ? $" [{codes}]" : "") +
+                   $", description '{a.Description}', {(a.IsUp ? "up" : "down")}" + (a.IsSystem ? ", hidden" : "");
+        }
+
         public static bool IsSystemAdapter(string name, string description) =>
             SystemAdapterMarkers.Any(m => (description ?? "").IndexOf(m, StringComparison.OrdinalIgnoreCase) >= 0)
             || InternalVirtualAdapterPrefixes.Any(p => (name ?? "").StartsWith(p, StringComparison.OrdinalIgnoreCase));

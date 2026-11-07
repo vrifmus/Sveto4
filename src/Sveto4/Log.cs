@@ -15,6 +15,10 @@ namespace Sveto4
         public static readonly string FilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sveto4", "sveto4.log");
 
+        /// <summary>Only the app itself writes the log: unit tests (another entry assembly) must not pollute it.</summary>
+        private static readonly bool Enabled = string.Equals(
+            System.Reflection.Assembly.GetEntryAssembly()?.GetName().Name, "sveto4", StringComparison.OrdinalIgnoreCase);
+
         public static void Info(string message) => Write("INFO ", message);
 
         public static void Error(Exception ex, string context = null) =>
@@ -22,6 +26,7 @@ namespace Sveto4
 
         private static void Write(string level, string message)
         {
+            if (!Enabled) return;
             try
             {
                 lock (Sync)
