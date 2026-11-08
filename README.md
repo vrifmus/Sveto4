@@ -42,7 +42,7 @@ VPN kill switch для Windows в системном трее. Блокируе�
 
 ## Профили VPN-клиентов
 
-Встроен профиль **Happ**. Другие клиенты подключаются импортом профиля: **VPN clients → Import profile…**, файл JSON. Образцы лежат в [`docs/profiles/`](docs/profiles/): [`nekobox.json`](docs/profiles/nekobox.json) для NekoBox и других клиентов на sing-box, а [`happ.json`](docs/profiles/happ.json) показывает встроенный профиль в виде файла. Удаление: **Remove profile ▸** (правила профиля удаляются вместе с ним).
+Встроен профиль **Happ**. Другие клиенты подключаются импортом профиля: **VPN clients → Import profile…**, файл JSON. Образцы лежат в [`docs/profiles/`](docs/profiles/): [`nekobox.json`](docs/profiles/nekobox.json) для NekoBox и других клиентов на sing-box, [`incy.json`](docs/profiles/incy.json) для INCY, а [`happ.json`](docs/profiles/happ.json) показывает встроенный профиль в виде файла. Удаление: **Remove profile ▸** (правила профиля удаляются вместе с ним).
 
 | Поле | Обязательное | Что значит |
 |---|---|---|

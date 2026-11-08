@@ -1,0 +1,8 @@
+{
+  "id": "incy",
+  "name": "INCY",
+  "adapterNamePrefixes": ["tun_incy"],
+  "mainProcesses": ["incy.exe"],
+  "defaultInstallDirs": ["%ProgramFiles%\\INCY"],
+  "excludeExe": ["unins*.exe"]
+}
