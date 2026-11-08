@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Unit tests never touch the real firewall, processes or network.
+      - name: Test
+        run: dotnet test -c Release
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.0.0-ci' }
+          "value=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        run: dotnet build src/Sveto4/Sveto4.csproj -c Release -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item src/Sveto4/bin/Release/net48/sveto4.exe out/
+          $hash = (Get-FileHash out/sveto4.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  sveto4.exe" | Set-Content out/sveto4.exe.sha256 -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sveto4
+          path: out/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sveto4
+          path: out
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/sveto4.exe
+            out/sveto4.exe.sha256
+          generate_release_notes: true

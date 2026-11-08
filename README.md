@@ -1,72 +1,79 @@
 # Sveto4
 
-VPN kill switch для Windows в системном трее. Блокирует весь исходящий трафик через Windows Firewall, кроме разрешённых сетевых интерфейсов. Нужен для VPN-клиентов, в которых своего kill switch нет или он сложно настраивается. Проверялся с **Happ**, для него есть готовый профиль клиента.
+**English** | [Русский](README.ru.md)
 
-Версия 2 написана на C# (.NET Framework 4.8, встроен в Windows 10/11, ничего устанавливать не нужно). Прежняя PowerShell-версия лежит в `legacy/`.
+A VPN kill switch for Windows that lives in the system tray. It blocks all outbound traffic with Windows Firewall, except through the network interfaces you allow. It is meant for VPN clients that have no kill switch of their own, or one that is hard to set up. Tested with **Happ** (built-in profile), **NekoBox** and **INCY** (sample profiles).
 
-## Структура
+Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to install. The original PowerShell version is kept in `legacy/`.
 
-| Путь | Назначение |
-|---|---|
-| `Sveto4.sln` | Решение: приложение и тесты |
-| `src/Sveto4/` | Исходный код приложения (C#, WinForms) |
-| `tests/Sveto4.Tests/` | Юнит-тесты (xUnit), файрвол не затрагивают: `dotnet test` |
-| `build.ps1` | Сборка: `dist\sveto4.exe`; если программа из `dist` запущена, перезапускает её |
-| `docs/` | Документация: [ROADMAP](docs/ROADMAP.md), [аудит старой версии](docs/AUDIT.md) |
-| `legacy/` | PowerShell-версия (образец, не развивается) |
+## Download and run
 
-## Сборка и запуск
+Download `sveto4.exe` from [Releases](../../releases) and put it in a folder only administrators can write to, for example `C:\Program Files\Sveto4\` (see [Security and limitations](#security-and-limitations)). The app asks for administrator rights.
 
-Для сборки нужен .NET SDK 8+ (`winget install Microsoft.DotNet.SDK.8`):
+- Only one copy runs at a time.
+- `--auto-enable` turns the kill switch on at startup. "Start with Windows" does not use it.
+
+### Build from source
+
+Requires the .NET SDK 8+ (`winget install Microsoft.DotNet.SDK.8`):
 
 ```powershell
-.\build.ps1
+dotnet test        # unit tests, they never touch the real firewall
+.\build.ps1        # builds dist\sveto4.exe (restarts it if it is running from dist)
 ```
 
-Запуск: `dist\sveto4.exe`. Программа запрашивает права администратора. Ключ `--auto-enable` сразу включает блокировку при старте. Пункт «Start with Windows» его не использует.
+| Path | Contents |
+|---|---|
+| `src/Sveto4/` | Application (C#, WinForms) |
+| `tests/Sveto4.Tests/` | Unit tests (xUnit) |
+| `docs/profiles/` | Sample VPN client profiles |
+| `docs/` | Roadmap and the audit of the old version (in Russian) |
+| `legacy/` | PowerShell version (reference only) |
 
-Одновременно может работать только одна копия. Старую PowerShell-версию перед запуском нужно закрыть. Правила файрвола у версий общие: новая подхватывает то, что настроила старая.
+## Tray menu
 
-## Меню в трее
+- **Turn ON / OFF**: blocks or allows outbound traffic by default in all firewall profiles (Domain, Private, Public).
+- **Allow LAN**: allows private subnets (`192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`, `fc00::/7`) and IPv6 link-local (`fe80::/10`).
+- **Allow WSL**: lets WSL out through the Hyper-V firewall (rule `KS-WSL-Allow`, Windows 11 22H2+). WSL traffic then follows the same rules as Windows: it goes out only through the allowed interfaces (the VPN) and is blocked when the VPN is down.
+- **VPN clients**: client profiles (see below). An enabled profile allows the client's executables and selects its tunnel adapters automatically, including adapters with random names that change on every connection.
+- **Interfaces**: adapters that traffic may use (rule `KS-Allow-<name>`). Adapters managed by a profile are checked and greyed out, with the client name on the right. A selected adapter that is missing or disconnected is marked `⚠ Not found` / `⚠ Disconnected`; click it to deselect. **None** clears all interfaces and disables profiles.
+- **Rules**: the app's firewall rules (prefix `KS-`), read-only.
+- **Block system leaks**: while the kill switch is on, disables built-in Windows rules that let traffic bypass it (see [System leaks](#system-leaks)).
+- **Reset ALL**: allows traffic and removes all `KS-*` rules. Does not touch autostart.
+- **Start with Windows**: a Task Scheduler task that starts the app at logon with highest privileges (no UAC prompt). If the exe is moved, the task follows it on the next start.
+- **Exit**: the kill switch **stays on** after exit or a crash. That is the point of a kill switch.
 
-- **Turn ON / OFF**: у всех профилей файрвола (Domain, Private, Public) исходящий трафик по умолчанию блокируется или разрешается.
-- **Allow LAN**: разрешает частные подсети (`192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`, `fc00::/7`) и локальные адреса IPv6 (`fe80::/10`). Если подсеть добавлена в новой версии, а LAN уже включён, недостающее правило создаётся автоматически.
-- **Allow WSL**: выпускает WSL в сеть. Создаёт правило `KS-WSL-Allow` в файрволе Hyper-V, через который проходит трафик WSL (Windows 11 22H2+). Дальше трафик WSL подчиняется тем же правилам, что и Windows: идёт только через выбранные интерфейсы (VPN), а при упавшем VPN блокируется. Если WSL не установлен, пункт неактивен с пометкой `not installed`. Прежний пункт «Allow NAT (WSL)» разрешал весь трафик процесса `System` через любой адаптер, то есть мимо VPN. Его правило `KS-NAT-Allow` при запуске удаляется, а если оно было включено, вместо него включается «Allow WSL».
-- **Block system leaks**: на время блокировки отключать системные правила, через которые трафик может идти мимо VPN (см. «Системные утечки»).
-- **VPN clients**: профили VPN-клиентов: встроенный **Happ** и импортированные (см. «Профили VPN-клиентов»). Включённый профиль разрешает все exe из папки клиента (кроме установщиков `unins*.exe`, `vc_redist*.exe`), в том числе ядра, которые ещё не запущены (`xray`, `sing-box`, `tun2proxy`), — правила `KS-App-happ-<exe>`. Папка берётся у запущенного Happ, иначе `%ProgramFiles%\FlyFrogLLC\Happ`. Адаптеры клиента (описание `Happ Tunnel` или имя `happ-…`) разрешаются автоматически: новый адаптер после смены ядра добавляется примерно за секунду, пропавший удаляется. Если клиент не найден, справа пометка `⚠ Not found`.
-- **Interfaces**: адаптеры, через которые трафик разрешён (правило `KS-Allow-<имя>`). Адаптеры, которыми управляет профиль, отмечены и неактивны, справа имя клиента. Выбранный вручную адаптер, которого нет в системе или который отключён, помечается справа `⚠ Not found` или `⚠ Disconnected`; щелчок по нему снимает выбор. **None** снимает все интерфейсы и выключает профили клиентов. Служебные адаптеры в списке не показываются: WAN Miniport, Teredo, Wi-Fi Direct, а также внутренние адаптеры Hyper-V `vEthernet (WSL …)` и `vEthernet (Default Switch)`. Трафик WSL и виртуальных машин выходит в интернет через основные адаптеры. Адаптер внешнего коммутатора Hyper-V показывается: через него может идти основное подключение.
-- **Rules**: список правил программы (префикс `KS-`), только просмотр.
-- **Reset ALL**: разрешает трафик и удаляет все правила `KS-*`, в том числе `KS-WSL-Allow`. Автозапуск не трогает.
-- **Start with Windows**: автозапуск через задачу Планировщика `Sveto4`. Задача запускается при входе текущего пользователя с наивысшими правами, поэтому окна UAC нет. Блокировку она сама не включает: состояние файрвола и так сохраняется после перезагрузки. Если exe переместили, при следующем запуске задача переключится на новый путь. Если задача запускает другую существующую копию программы, справа пометка `other copy`, щелчок переключает задачу на эту копию. Если файла из задачи нет, справа пометка `⚠ Not found`.
-- **Exit**: выход. Блокировка при этом **остаётся включённой**: kill switch должен защищать, даже если программа закрыта или упала.
+## VPN client profiles
 
-## Профили VPN-клиентов
+**Happ** is built in. Other clients are added with **VPN clients → Import profile…** (a JSON file) and removed with **Remove profile ▸** (their rules are removed too). Samples: [`nekobox.json`](docs/profiles/nekobox.json) (NekoBox and other sing-box based clients), [`incy.json`](docs/profiles/incy.json), [`happ.json`](docs/profiles/happ.json) (the built-in profile as a file).
 
-Встроен профиль **Happ**. Другие клиенты подключаются импортом профиля: **VPN clients → Import profile…**, файл JSON. Образцы лежат в [`docs/profiles/`](docs/profiles/): [`nekobox.json`](docs/profiles/nekobox.json) для NekoBox и других клиентов на sing-box, [`incy.json`](docs/profiles/incy.json) для INCY, а [`happ.json`](docs/profiles/happ.json) показывает встроенный профиль в виде файла. Удаление: **Remove profile ▸** (правила профиля удаляются вместе с ним).
+```json
+{
+  "id": "nekobox",
+  "name": "NekoBox",
+  "adapterDescriptions": ["sing-tun Tunnel"],
+  "mainProcesses": ["nekobox.exe", "nekobox_core.exe"],
+  "defaultInstallDirs": ["%APPDATA%\\NekoBox"],
+  "allowExe": ["nekobox.exe", "nekobox_core.exe"]
+}
+```
 
-| Поле | Обязательное | Что значит |
+| Field | Required | Meaning |
 |---|---|---|
-| `id` | да | Латиница в нижнем регистре и цифры, до 20 символов. Используется в именах правил `KS-App-<id>-<exe>` |
-| `name` | да | Название в меню |
-| `adapterDescriptions` | да* | Описания туннельного адаптера (точное совпадение). Подходит, если имя адаптера случайное, как `tun_jvvrwugzd` у NekoBox |
-| `adapterNamePrefixes` | да* | Начало имени адаптера, от 3 символов (`happ-`) |
-| `mainProcesses` | нет | Имена exe, по которым ищется папка клиента среди запущенных программ |
-| `defaultInstallDirs` | нет | Папки клиента, если он не запущен; можно `%APPDATA%`, `%ProgramFiles%` и т.п. |
-| `allowExe` | нет | Разрешить **только** эти exe (шаблоны с `*`). Без поля разрешаются все exe из папки клиента |
-| `excludeExe` | нет | Никогда не разрешать эти exe (установщики и т.п.) |
+| `id` | yes | Lowercase latin letters and digits, up to 20. Used in rule names `KS-App-<id>-<exe>` |
+| `name` | yes | Name shown in the menu |
+| `adapterDescriptions` | yes* | Tunnel adapter descriptions (exact match). Use it when the adapter name is random |
+| `adapterNamePrefixes` | yes* | Adapter name prefixes, at least 3 characters (`happ-`) |
+| `mainProcesses` | no | Exe names used to find the client folder among running processes |
+| `defaultInstallDirs` | no | Client folders when it is not running; environment variables allowed |
+| `allowExe` | no | Allow **only** these executables (`*` patterns). Without it, every exe in the client folder is allowed |
+| `excludeExe` | no | Never allow these executables (installers etc.) |
 
-\* Нужно хотя бы одно из двух полей.
+\* At least one of the two.
 
-Безопасность:
-- Профиль решает, каким программам открыть сеть в обход блокировки. Поэтому профили хранятся в `%ProgramData%\Sveto4\profiles\`, а менять папку `%ProgramData%\Sveto4` могут только администраторы.
-- Если клиент лежит в папке, куда может писать любая программа (например, `%APPDATA%`), укажите `allowExe`. Иначе любой exe, подброшенный в эту папку, получит доступ в сеть.
-- Папка клиента не может быть корнем диска, `Windows`, `Program Files`, `ProgramData` или корнем профиля пользователя. Такие папки отклоняются и при импорте, и когда папка определяется по запущенному процессу.
+Profiles are stored in `%ProgramData%\Sveto4\profiles\`; the app makes `%ProgramData%\Sveto4` writable by administrators only. A drive root, `Windows`, `Program Files`, `ProgramData` or a user profile root is never accepted as a client folder.
 
-Адаптеры, выбранные профилем, программа запоминает (`settings.txt`). Поэтому пропавший адаптер снимается, даже если профиль узнаёт адаптеры только по описанию.
-
-## Подсказка
-
-При наведении на иконку:
+## Tooltip
 
 ```
 🟢 Sveto4
@@ -78,47 +85,40 @@ Block system leaks: ON (4)
 Interfaces: happ-xray, Wi-Fi
 ```
 
-Кружок перед названием повторяет цвет иконки (см. «Цвета иконки»). `Block system leaks`: `ON (N)` — отключено N системных правил; `ON, N open` — N правил открыто (не удалось отключить); `OFF` — переключатель выключен. Длинный список интерфейсов обрезается с `…` (предел Windows — 127 символов).
+The circle repeats the icon color:
 
-## Цвета иконки
-
-| Цвет | Состояние |
+| Color | State |
 |---|---|
-| 🔴 Красный | Выключен |
-| 🟢 Зелёный | Включён, выбранный интерфейс работает |
-| ⚪ Серый | Включён без интерфейсов, или выбранный интерфейс отключён |
-| 🔵 Синий | Выбранного адаптера нет в системе |
-| 🟠 Оранжевый | Включён частично (см. ниже) |
-| 🟡 Жёлтый | Идёт операция |
+| 🔴 Red | Off |
+| 🟢 Green | On, a selected interface is up |
+| ⚪ Grey | On with no interfaces, or the selected interface is down |
+| 🔵 Blue | The selected adapter is missing |
+| 🟠 Orange | Partially on: some firewall profiles do not block. Use **Turn ON / OFF (all profiles)**; `firewall disabled` means the firewall itself is off for that profile |
+| 🟡 Yellow | An operation is in progress |
 
-## Частичное включение
+## System leaks
 
-Если одни профили файрвола блокируют трафик, а другие нет, программа показывает оранжевую иконку. В меню появляется строка «Partially on. Not blocked: …» со списком незаблокированных профилей. Так бывает, если настройки файрвола изменили вручную, другой программой или обновлением Windows.
+Built-in Windows Allow rules still work while outbound traffic is blocked. The app tracks four of them, recognized by their properties (so the Windows language does not matter): **DNS**, **IPv6 tunnel**, **Teredo** and **IP-HTTPS**.
 
-Что делать:
-- **Turn ON (all profiles)**: заблокировать во всех профилях;
-- **Turn OFF (all profiles)**: разрешить во всех профилях;
-- если в списке есть пометка `firewall disabled`, значит, для этого профиля файрвол выключен целиком. Включите его в «Безопасность Windows → Брандмауэр и защита сети», иначе блокировка в этом профиле не работает.
+- With **Block system leaks** on (default), they are disabled while the kill switch is on, remembered in `%ProgramData%\Sveto4\disabled-rules.txt` and re-enabled on Turn OFF / Reset ALL. Rules you disabled yourself are left alone. If Windows re-enables a rule, the app disables it again (at most every 5 minutes).
+- With it off, the menu only warns: **Possible leaks (N)**.
+- Side effect: if a VPN client resolves its server through Windows DNS, it cannot reconnect while the VPN is down. Turn the option off in that case.
 
-## Тема меню
+## Security and limitations
 
-Меню следует режиму приложений Windows (Параметры → Персонализация → Цвета): в тёмном режиме оно тёмное. Используются недокументированные функции Windows 10 1903+; если они недоступны, меню остаётся светлым.
+- **The kill switch is built on Windows Firewall rules**, not on its own WFP filters. A program with administrator rights can add WFP filters and bypass it. sing-box based cores (NekoBox, INCY) do exactly that to reach their server. That is fine for a VPN client, but it also means the kill switch does not stop malware running as administrator.
+- **A client profile grants network access to programs.** Import only profiles you understand. For clients in user-writable folders (`%APPDATA%`), use `allowExe`.
+- **Autostart runs the exe with administrator rights and no UAC prompt.** Keep the app in a folder only administrators can write to, such as `C:\Program Files\Sveto4\`. Otherwise any program could replace `sveto4.exe` and gain administrator rights at the next logon.
+- **The exe is not code-signed**, so SmartScreen may warn on first run. Release builds are produced by GitHub Actions from this repository's source.
+- Only the four system rules above are handled. Other built-in Allow rules (Store, Remote Assistance, etc.) stay active.
+- Client executable rules are created when the profile is enabled. If the client is reinstalled to another folder, disable and enable the profile again.
 
-## Ошибки
+## Errors and log
 
-После щелчка меню сразу показывает ожидаемый результат (галочку и т.п.), пока операция идёт в фоне (иконка жёлтая). Затем состояние перечитывается из файрвола; если операция не удалась, меню вернётся к фактическому состоянию, а ошибка будет в журнале.
+The menu shows the expected result right after a click, then re-reads the real state from the firewall; if the operation failed, it shows the actual state. No error dialogs are shown: errors go to `%LOCALAPPDATA%\Sveto4\sveto4.log`, together with operation timings and adapters that appear after startup.
 
-Окна с ошибками программа не показывает. Ошибки записываются в журнал `%LOCALAPPDATA%\Sveto4\sveto4.log`. Временные сбои после выхода из сна пропускаются, и состояние перечитывается при следующем опросе (раз в 3 секунды). В журнал также пишется длительность каждой операции и адаптеры, появившиеся после запуска программы (`New adapter: …`).
+The menu follows the Windows light/dark app mode (Windows 10 1903+).
 
-## Известные ограничения
+## License
 
-- Правила для exe клиента создаются при включении профиля. Если клиент переустановят в другую папку, выключите и снова включите профиль.
-
-## Системные утечки
-
-Встроенные разрешающие правила Windows действуют и при включённой блокировке. Программа отслеживает 4 из них: **DNS** (запросы имён сайтов могут уходить провайдеру мимо VPN), **IPv6-туннель**, **Teredo** и **IP-HTTPS**. Правила распознаются по свойствам, поэтому язык Windows не важен.
-
-- **Block system leaks** (переключатель в меню, включён по умолчанию): на время блокировки программа отключает эти правила и запоминает их в `%ProgramData%\Sveto4\disabled-rules.txt`. При **Turn OFF** или **Reset ALL** включает обратно только их. Правила, которые вы отключили сами, не трогаются. Если Windows снова включит правило, программа отключит его повторно (не чаще раза в 5 минут). В меню виден пункт **«System leaks blocked (N)»**.
-- Если переключатель выключен, правила не меняются, а в меню появляется предупреждение **«Possible leaks (N)»**.
-- **Возможный побочный эффект:** если VPN-клиент ищет адрес своего сервера через DNS Windows, то при упавшем VPN он не сможет переподключиться, пока блокировка включена. В этом случае снимите «Block system leaks».
-- После выхода или падения программы правила остаются отключёнными, как и сама блокировка. Восстановить вручную можно в «Мониторе брандмауэра Защитника Windows» (`wf.msc`) → «Правила для исходящего подключения». Подробнее в [AUDIT.md](docs/AUDIT.md), п. 1.
+[MIT](LICENSE).
