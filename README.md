@@ -6,6 +6,15 @@ A VPN kill switch for Windows that lives in the system tray. It blocks all outbo
 
 Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to install. The original PowerShell version is kept in `legacy/`.
 
+## Features
+
+- **Survives crashes and reboots.** Blocking lives in Windows Firewall itself, so it stays on after the app exits, crashes or the PC restarts, and it does not depend on the VPN client running.
+- **VPN client profiles.** Happ is built in, others are imported as JSON. A profile allows the client's executables, so core switches (xray ↔ sing-box) and cores started later just work.
+- **Automatic tunnel adapters.** A new TUN adapter, even with a random name like `tun_<random>`, is allowed as soon as it appears; a vanished one is removed.
+- **System leak blocking.** Built-in Windows rules that can leak traffic (DNS, IPv6, Teredo, IP-HTTPS) are disabled while blocking and restored afterwards. Optional.
+- **LAN and WSL toggles.** Allow LAN (including `fe80::/10`) and Allow WSL (via a Hyper-V firewall rule, not by allowing all system traffic).
+- **Small and native.** One small exe on .NET Framework 4.8, built into Windows 10/11. Tray menu follows the light/dark theme; firewall profiles that disagree are shown as "partially on".
+
 ## Download and run
 
 Download `sveto4.exe` from [Releases](../../releases) and put it in a folder only administrators can write to, for example `C:\Program Files\Sveto4\` (see [Security and limitations](#security-and-limitations)). The app asks for administrator rights.
