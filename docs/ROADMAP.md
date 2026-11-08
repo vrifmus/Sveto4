@@ -90,7 +90,8 @@
 - [x] **2026-11-08** — LICENSE: MIT, правообладатель `vrifmus`.
 - [x] **2026-11-08** — Раздел «Features» / «Возможности» в README (по итогам поиска аналогов).
 - [x] **2026-11-08** — Опубликовано: https://github.com/vrifmus/Sveto4 (публичный, MIT). Первый прогон CI прошёл.
-- [ ] **Текущий шаг:** первый релиз (тег `v2.0.0`); обновить версии actions (предупреждение GitHub об устаревании Node.js 20).
+- [x] **2026-11-08** — Actions обновлены до версий на Node.js 24 (checkout v7, setup-dotnet v6, upload-artifact v7, download-artifact v8, action-gh-release v3).
+- [x] **2026-11-08** — Первый релиз [v2.0.0](https://github.com/vrifmus/Sveto4/releases/tag/v2.0.0): `sveto4.exe` и `sveto4.exe.sha256`, собраны GitHub Actions.
 - [ ] Portable-режим (обсудить отдельно: безопасность автозапуска из папки, доступной на запись).
 - [ ] Дождаться адаптера с «иероглифами» в журнале и по его описанию решить, как его скрыть.
 
