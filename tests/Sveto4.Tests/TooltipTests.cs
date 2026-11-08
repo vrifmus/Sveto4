@@ -43,6 +43,32 @@ namespace Sveto4.Tests
             Assert.Contains("Block system leaks: " + expected + "\n", KillSwitch.FormatTooltip(s, 127));
         }
 
+        [Theory]
+        [InlineData((int)KsMode.Off, "\U0001F534 Sveto4\n")]
+        [InlineData((int)KsMode.Partial, "\U0001F7E0 Sveto4\n")]
+        [InlineData((int)KsMode.On, "⚪ Sveto4\n")] // on, no interfaces
+        public void StatusCircle_MatchesIconColor(int mode, string start)
+        {
+            var s = new KsState { Mode = (KsMode)mode };
+            Assert.StartsWith(start, KillSwitch.FormatTooltip(s, 127, KillSwitch.GetIconState(s, false)));
+        }
+
+        [Fact]
+        public void StatusCircle_Connected()
+        {
+            var s = new KsState { Mode = KsMode.On, Adapters = { TestEnv.Adapter("Wi-Fi") } };
+            s.Interfaces.Add("Wi-Fi");
+            Assert.StartsWith("\U0001F7E2 Sveto4\n", KillSwitch.FormatTooltip(s, 127, KillSwitch.GetIconState(s, false)));
+        }
+
+        [Fact]
+        public void StatusCircle_LongListStillFits()
+        {
+            var s = new KsState { Mode = KsMode.On };
+            for (var i = 0; i < 10; i++) s.Interfaces.Add("Very long adapter name " + i);
+            Assert.Equal(127, KillSwitch.FormatTooltip(s, 127, IconState.Disconnected).Length);
+        }
+
         [Fact]
         public void Partial()
         {

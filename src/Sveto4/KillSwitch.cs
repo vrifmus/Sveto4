@@ -260,7 +260,7 @@ namespace Sveto4
         // ---------- Tray tooltip ----------
 
         /// <summary>Multi-line tooltip; the interface list is shortened with "…" to fit <paramref name="maxLength"/>.</summary>
-        public static string FormatTooltip(KsState s, int maxLength)
+        public static string FormatTooltip(KsState s, int maxLength, IconState? icon = null)
         {
             var mode = s.Mode == KsMode.On ? "ON" : s.Mode == KsMode.Partial ? "PARTIAL" : "OFF";
             string leaks;
@@ -270,7 +270,7 @@ namespace Sveto4
             else leaks = "ON";
 
             var head = string.Join("\n",
-                "Sveto4",
+                (icon != null ? StatusCircle(icon.Value) + " " : "") + "Sveto4",
                 "Kill switch: " + mode,
                 "LAN: " + OnOff(s.Lan),
                 "WSL: " + OnOff(s.Wsl),
@@ -292,6 +292,20 @@ namespace Sveto4
         }
 
         private static string OnOff(bool on) => on ? "ON" : "OFF";
+
+        /// <summary>Colored circle emoji matching the tray icon color.</summary>
+        public static string StatusCircle(IconState icon)
+        {
+            switch (icon)
+            {
+                case IconState.Off: return "\U0001F534";            // red
+                case IconState.Connected: return "\U0001F7E2";      // green
+                case IconState.AdapterMissing: return "\U0001F535"; // blue
+                case IconState.Partial: return "\U0001F7E0";        // orange
+                case IconState.Busy: return "\U0001F7E1";           // yellow
+                default: return "⚪";                           // white/gray: no interfaces, disconnected
+            }
+        }
 
         // ---------- Predicted state (shown immediately, corrected by the next read) ----------
 

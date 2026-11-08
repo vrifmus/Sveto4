@@ -644,7 +644,7 @@ namespace Sveto4
 
         private void UpdateTooltip()
         {
-            var text = KillSwitch.FormatTooltip(state, ShellTooltipMax);
+            var text = KillSwitch.FormatTooltip(state, ShellTooltipMax, KillSwitch.GetIconState(state, busy));
             if (text == lastTooltip) return;
             lastTooltip = text;
             SetTooltip(text);
