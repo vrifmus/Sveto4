@@ -13,9 +13,9 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
 
@@ -41,7 +41,7 @@ jobs:
           $hash = (Get-FileHash out/sveto4.exe -Algorithm SHA256).Hash.ToLower()
           "$hash  sveto4.exe" | Set-Content out/sveto4.exe.sha256 -Encoding ascii
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sveto4
           path: out/
@@ -53,12 +53,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: sveto4
           path: out
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             out/sveto4.exe
