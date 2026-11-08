@@ -1,0 +1,8 @@
+{
+  "id": "nekobox",
+  "name": "NekoBox",
+  "adapterDescriptions": ["sing-tun Tunnel"],
+  "mainProcesses": ["nekobox.exe", "nekobox_core.exe"],
+  "defaultInstallDirs": ["%APPDATA%\\NekoBox"],
+  "allowExe": ["nekobox.exe", "nekobox_core.exe"]
+}

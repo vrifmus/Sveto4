@@ -91,5 +91,9 @@ namespace Sveto4.Tests
         public readonly Dictionary<string, bool> Clients = new Dictionary<string, bool>();
         public bool? GetClientEnabled(string clientId) => Clients.TryGetValue(clientId, out var v) ? v : (bool?)null;
         public void SetClientEnabled(string clientId, bool enabled) => Clients[clientId] = enabled;
+        public readonly Dictionary<string, List<string>> ClientAdapters = new Dictionary<string, List<string>>();
+        public List<string> GetClientAdapters(string clientId) =>
+            ClientAdapters.TryGetValue(clientId, out var v) ? v.ToList() : new List<string>();
+        public void SetClientAdapters(string clientId, IEnumerable<string> adapters) => ClientAdapters[clientId] = adapters.ToList();
     }
 }

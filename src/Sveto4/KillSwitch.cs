@@ -184,18 +184,37 @@ namespace Sveto4
         private readonly ClientEnvironment env;
         private readonly IStateStore store;
         private readonly IHyperVFirewall hyperV;
+        private readonly IProfileStore profileStore;
 
-        public KillSwitch(IFirewall firewall, ClientEnvironment env, IStateStore store, IHyperVFirewall hyperV = null)
+        public KillSwitch(IFirewall firewall, ClientEnvironment env, IStateStore store, IHyperVFirewall hyperV = null,
+                          IProfileStore profileStore = null)
         {
             this.firewall = firewall;
             this.env = env;
             this.store = store;
             this.hyperV = hyperV ?? new NoHyperVFirewall();
+            this.profileStore = profileStore;
         }
 
         public static KillSwitch CreateDefault() =>
             new KillSwitch(new ComFirewall(), ClientProfiles.CreateDefaultEnvironment(GetWmiProcesses), new FileStateStore(),
-                           new WmiHyperVFirewall());
+                           new WmiHyperVFirewall(), new FileProfileStore());
+
+        /// <summary>Built-in profiles followed by imported ones.</summary>
+        public List<ClientProfile> Profiles()
+        {
+            var result = ClientProfiles.BuiltIn.ToList();
+            if (profileStore == null) return result;
+            try
+            {
+                result.AddRange(profileStore.LoadImported());
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "load profiles");
+            }
+            return result;
+        }
 
         // ---------- Pure logic ----------
 
@@ -371,6 +390,13 @@ namespace Sveto4
             return n;
         }
 
+        public static KsState PredictRemoveProfile(KsState s, ClientProfile profile)
+        {
+            var n = PredictClient(s, profile, false);
+            n.Clients = n.Clients.Where(c => c.Profile.Id != profile.Id).ToList();
+            return n;
+        }
+
         public static KsState PredictClear(KsState s)
         {
             var n = s.Clone();
@@ -391,7 +417,7 @@ namespace Sveto4
         }
 
         private static void SetClientEnabled(KsState n, string clientId, bool on) =>
-            n.Clients = n.Clients.Select(c => c.Profile.Id == clientId ? new ClientStatus(c.Profile, on, c.InstallDir) : c).ToList();
+            n.Clients = n.Clients.Select(c => c.Profile.Id == clientId ? new ClientStatus(c.Profile, on, c.InstallDir, c.KnownAdapters) : c).ToList();
 
         private static void MoveLeaks(List<LeakInfo> from, List<LeakInfo> to)
         {
@@ -536,8 +562,9 @@ namespace Sveto4
             s.Leaks = FindLeaks(all.Where(r => r.IsOutboundAllow && r.Enabled));
             s.DisabledLeaks = store.LoadDisabledRules();
             s.BlockLeaks = store.BlockSystemLeaks;
-            s.Clients = ClientProfiles.All
-                .Select(p => new ClientStatus(p, IsClientEnabled(p, s.Rules), ClientProfiles.ResolveInstallDir(p, env)))
+            s.Clients = Profiles()
+                .Select(p => new ClientStatus(p, IsClientEnabled(p, s.Rules), ClientProfiles.ResolveInstallDir(p, env),
+                                              store.GetClientAdapters(p.Id)))
                 .ToList();
         }
 
@@ -665,7 +692,11 @@ namespace Sveto4
         /// <summary>"None": removes all interface and client rules and disables client profiles.</summary>
         public void ClearInterfaces()
         {
-            foreach (var profile in ClientProfiles.All) store.SetClientEnabled(profile.Id, false);
+            foreach (var profile in Profiles())
+            {
+                store.SetClientEnabled(profile.Id, false);
+                store.SetClientAdapters(profile.Id, new string[0]);
+            }
             firewall.RemoveWhere(n => n.StartsWith(AllowPrefix, StringComparison.OrdinalIgnoreCase)
                                    || n.StartsWith(AppPrefix, StringComparison.OrdinalIgnoreCase));
         }
@@ -673,7 +704,11 @@ namespace Sveto4
         public void ResetAll()
         {
             SetMode(false);
-            foreach (var profile in ClientProfiles.All) store.SetClientEnabled(profile.Id, false);
+            foreach (var profile in Profiles())
+            {
+                store.SetClientEnabled(profile.Id, false);
+                store.SetClientAdapters(profile.Id, new string[0]);
+            }
             firewall.RemoveWhere(n => n.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase));
             try
             {
@@ -696,7 +731,7 @@ namespace Sveto4
             var s = new KsState();
             ReadRules(s);
             ReadAdapters(s);
-            foreach (var iface in ClientProfiles.PlanAdapters(profile, s).ToSelect) SelectInterface(iface);
+            ApplyAdapterPlan(profile, ClientProfiles.PlanAdapters(profile, s));
         }
 
         /// <summary>Removes the client's executable rules and its adapter rules.</summary>
@@ -706,6 +741,50 @@ namespace Sveto4
             firewall.RemoveWhere(n => n.StartsWith(AppPrefix + profile.Id + "-", StringComparison.OrdinalIgnoreCase));
             foreach (var iface in s.Interfaces.Where(i => ClientProfiles.IsClientAdapterName(profile, i, s)).ToList())
                 DeselectInterface(iface);
+            store.SetClientAdapters(profile.Id, new string[0]);
+        }
+
+        /// <summary>Selects/deselects client adapters and remembers which ones belong to the client.</summary>
+        private void ApplyAdapterPlan(ClientProfile profile, ClientAdapterPlan plan)
+        {
+            var known = new HashSet<string>(store.GetClientAdapters(profile.Id), StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var iface in plan.ToSelect)
+                {
+                    known.Add(iface); // recorded before the rule exists: removal must never be forgotten
+                    store.SetClientAdapters(profile.Id, known);
+                    SelectInterface(iface);
+                }
+                foreach (var iface in plan.ToDeselect)
+                {
+                    DeselectInterface(iface);
+                    known.Remove(iface);
+                }
+            }
+            finally
+            {
+                store.SetClientAdapters(profile.Id, known);
+            }
+        }
+
+        /// <summary>Validates and stores a profile file. Throws <see cref="ProfileException"/> with a user-facing message.</summary>
+        public ClientProfile ImportProfile(string json)
+        {
+            if (profileStore == null) throw new ProfileException("Profiles cannot be imported.");
+            var profile = ProfileFile.Parse(json, Profiles().Select(p => p.Id));
+            profileStore.Save(profile.Id, json);
+            Log.Info($"Imported profile {profile.Id} ({profile.Name})");
+            return profile;
+        }
+
+        /// <summary>Removes an imported profile together with its firewall rules.</summary>
+        public void RemoveProfile(ClientProfile profile, KsState s)
+        {
+            if (profile.BuiltIn) throw new InvalidOperationException("Built-in profiles cannot be removed.");
+            DisableClient(profile, s);
+            profileStore?.Delete(profile.Id);
+            Log.Info($"Removed profile {profile.Id} ({profile.Name})");
         }
 
         /// <summary>For enabled clients: adds new adapters, removes vanished ones, restores missing executable rules.</summary>
@@ -714,8 +793,7 @@ namespace Sveto4
             foreach (var c in s.Clients.Where(c => c.Enabled))
             {
                 var plan = ClientProfiles.PlanAdapters(c.Profile, s);
-                foreach (var iface in plan.ToSelect) SelectInterface(iface);
-                foreach (var iface in plan.ToDeselect) DeselectInterface(iface);
+                ApplyAdapterPlan(c.Profile, plan);
                 if (plan.ToSelect.Count + plan.ToDeselect.Count > 0)
                     Log.Info($"{c.Profile.Name} adapters: +[{string.Join(", ", plan.ToSelect)}] -[{string.Join(", ", plan.ToDeselect)}]");
 

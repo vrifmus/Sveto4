@@ -147,6 +147,8 @@ namespace Sveto4.Tests
             public bool BlockSystemLeaks { get; set; } = true;
             public bool? GetClientEnabled(string clientId) => null;
             public void SetClientEnabled(string clientId, bool enabled) { }
+            public List<string> GetClientAdapters(string clientId) => new List<string>();
+            public void SetClientAdapters(string clientId, IEnumerable<string> adapters) { }
         }
 
         [Fact]

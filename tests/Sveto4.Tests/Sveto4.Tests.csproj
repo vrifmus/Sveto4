@@ -21,4 +21,9 @@
     <ProjectReference Include="..\..\src\Sveto4\Sveto4.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Sample profiles from docs are checked by the tests. -->
+    <None Include="..\..\docs\profiles\*.json" Link="profiles\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

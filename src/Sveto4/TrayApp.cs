@@ -518,6 +518,78 @@ namespace Sveto4
             }
             if (state.Clients.Count == 0)
                 miClients.MenuItems.Add(new MenuItem("No profiles") { Enabled = false });
+
+            miClients.MenuItems.Add(new MenuItem("-"));
+            miClients.MenuItems.Add(new MenuItem("Import profile…", (s, e) => OnImportProfile()) { Enabled = !busy });
+            var imported = state.Clients.Where(c => !c.Profile.BuiltIn).Select(c => c.Profile).ToList();
+            if (imported.Count > 0)
+            {
+                var remove = new MenuItem("Remove profile");
+                foreach (var p in imported)
+                {
+                    var profile = p;
+                    remove.MenuItems.Add(new MenuItem(profile.Name, (s, e) => OnRemoveProfile(profile)));
+                }
+                miClients.MenuItems.Add(remove);
+            }
+        }
+
+        private void OnImportProfile()
+        {
+            if (busy) return;
+            using (var owner = DialogOwner())
+            using (var dialog = new OpenFileDialog
+            {
+                Title = "Import VPN client profile",
+                Filter = "Sveto4 profile (*.json)|*.json|All files (*.*)|*.*",
+            })
+            {
+                if (dialog.ShowDialog(owner) != DialogResult.OK) return;
+                try
+                {
+                    if (new System.IO.FileInfo(dialog.FileName).Length > ProfileFile.MaxSize)
+                        throw new ProfileException("The file is too large for a profile.");
+                    var profile = ks.ImportProfile(System.IO.File.ReadAllText(dialog.FileName));
+                    MessageBox.Show(owner, $"Profile \"{profile.Name}\" imported.\nEnable it in VPN clients.",
+                        "Sveto4", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex) when (ex is ProfileException || ex is System.IO.IOException || ex is UnauthorizedAccessException)
+                {
+                    Log.Info("Import profile failed: " + ex.Message);
+                    MessageBox.Show(owner, "The profile was not imported.\n\n" + ex.Message,
+                        "Sveto4", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+            forceFullRefresh = true;
+            OnQuickPoll();
+        }
+
+        private void OnRemoveProfile(ClientProfile profile)
+        {
+            if (busy) return;
+            using (var owner = DialogOwner())
+            {
+                if (MessageBox.Show(owner, $"Remove profile \"{profile.Name}\"?\nIts firewall rules are removed too.",
+                        "Sveto4", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    return;
+            }
+            var snapshot = state;
+            Run("Remove profile " + profile.Id, () => ks.RemoveProfile(profile, snapshot),
+                st => KillSwitch.PredictRemoveProfile(st, profile));
+        }
+
+        /// <summary>Invisible top-most owner, so dialogs of a tray app appear in front.</summary>
+        private static Form DialogOwner()
+        {
+            var form = new Form
+            {
+                TopMost = true, ShowInTaskbar = false, FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.CenterScreen, Size = new Size(1, 1), Opacity = 0,
+            };
+            form.Show();
+            form.Activate();
+            return form;
         }
 
         private void BuildInterfacesMenu()

@@ -1,0 +1,9 @@
+{
+  "id": "happ",
+  "name": "Happ",
+  "adapterDescriptions": ["Happ Tunnel"],
+  "adapterNamePrefixes": ["happ-"],
+  "mainProcesses": ["Happ.exe", "happd.exe"],
+  "defaultInstallDirs": ["%ProgramFiles%\\FlyFrogLLC\\Happ"],
+  "excludeExe": ["unins*.exe", "vc_redist*.exe"]
+}
