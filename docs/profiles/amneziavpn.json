@@ -1,0 +1,8 @@
+{
+  "id": "amneziavpn",
+  "name": "AmneziaVPN",
+  "adapterNamePrefixes": ["AmneziaVPN"],
+  "mainProcesses": ["AmneziaVPN.exe", "AmneziaVPN-service.exe"],
+  "defaultInstallDirs": ["%ProgramFiles%\\AmneziaVPN"],
+  "excludeExe": ["maintenancetool.exe", "vc_redist*.exe", "devcon.exe"]
+}

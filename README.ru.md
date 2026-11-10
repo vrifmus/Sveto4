@@ -55,13 +55,13 @@ VPN kill switch для Windows в системном трее. Блокируе�
 
 ## Профили VPN-клиентов
 
-Встроен профиль **Happ**. Другие клиенты подключаются импортом профиля: **VPN clients → Import profile…**, файл JSON. Образцы лежат в [`docs/profiles/`](docs/profiles/): [`nekobox.json`](docs/profiles/nekobox.json) для NekoBox и других клиентов на sing-box, [`incy.json`](docs/profiles/incy.json) для INCY, а [`happ.json`](docs/profiles/happ.json) показывает встроенный профиль в виде файла. Удаление: **Remove profile ▸** (правила профиля удаляются вместе с ним).
+Встроен профиль **Happ**. Другие клиенты подключаются импортом профиля: **VPN clients → Import profile…**, файл JSON. Образцы лежат в [`docs/profiles/`](docs/profiles/): [`nekobox.json`](docs/profiles/nekobox.json) для NekoBox и других клиентов на sing-box, [`incy.json`](docs/profiles/incy.json) для INCY, [`amneziavpn.json`](docs/profiles/amneziavpn.json) для AmneziaVPN (протокол AmneziaWG), а [`happ.json`](docs/profiles/happ.json) показывает встроенный профиль в виде файла. Удаление: **Remove profile ▸** (правила профиля удаляются вместе с ним).
 
 | Поле | Обязательное | Что значит |
 |---|---|---|
 | `id` | да | Латиница в нижнем регистре и цифры, до 20 символов. Используется в именах правил `KS-App-<id>-<exe>` |
 | `name` | да | Название в меню |
-| `adapterDescriptions` | да* | Описания туннельного адаптера (точное совпадение). Подходит, если имя адаптера случайное, как `tun_jvvrwugzd` у NekoBox |
+| `adapterDescriptions` | да* | Описания туннельного адаптера (точное совпадение; номер « #N», который Windows дописывает к одинаковым описаниям, не учитывается). Подходит, если имя адаптера случайное, как `tun_jvvrwugzd` у NekoBox |
 | `adapterNamePrefixes` | да* | Начало имени адаптера, от 3 символов (`happ-`) |
 | `mainProcesses` | нет | Имена exe, по которым ищется папка клиента среди запущенных программ |
 | `defaultInstallDirs` | нет | Папки клиента, если он не запущен; можно `%APPDATA%`, `%ProgramFiles%` и т.п. |

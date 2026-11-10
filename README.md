@@ -4,7 +4,7 @@
 
 ![Sveto4 tray menu and tooltip](docs/screenshot.png)
 
-A VPN kill switch for Windows that lives in the system tray. It blocks all outbound traffic with Windows Firewall, except through the network interfaces you allow. It is meant for VPN clients that have no kill switch of their own, or one that is hard to set up. Tested with **Happ** (built-in profile), **NekoBox** and **INCY** (sample profiles).
+A VPN kill switch for Windows that lives in the system tray. It blocks all outbound traffic with Windows Firewall, except through the network interfaces you allow. It is meant for VPN clients that have no kill switch of their own, or one that is hard to set up. Tested with **Happ** (built-in profile), **NekoBox**, **INCY** and **AmneziaVPN** (sample profiles).
 
 Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to install. The original PowerShell version is kept in `legacy/`.
 
@@ -56,7 +56,7 @@ dotnet test        # unit tests, they never touch the real firewall
 
 ## VPN client profiles
 
-**Happ** is built in. Other clients are added with **VPN clients → Import profile…** (a JSON file) and removed with **Remove profile ▸** (their rules are removed too). Samples: [`nekobox.json`](docs/profiles/nekobox.json) (NekoBox and other sing-box based clients), [`incy.json`](docs/profiles/incy.json), [`happ.json`](docs/profiles/happ.json) (the built-in profile as a file).
+**Happ** is built in. Other clients are added with **VPN clients → Import profile…** (a JSON file) and removed with **Remove profile ▸** (their rules are removed too). Samples: [`nekobox.json`](docs/profiles/nekobox.json) (NekoBox and other sing-box based clients), [`incy.json`](docs/profiles/incy.json), [`amneziavpn.json`](docs/profiles/amneziavpn.json) (AmneziaWG protocol), [`happ.json`](docs/profiles/happ.json) (the built-in profile as a file).
 
 ```json
 {
@@ -73,7 +73,7 @@ dotnet test        # unit tests, they never touch the real firewall
 |---|---|---|
 | `id` | yes | Lowercase latin letters and digits, up to 20. Used in rule names `KS-App-<id>-<exe>` |
 | `name` | yes | Name shown in the menu |
-| `adapterDescriptions` | yes* | Tunnel adapter descriptions (exact match). Use it when the adapter name is random |
+| `adapterDescriptions` | yes* | Tunnel adapter descriptions (exact match; the " #N" Windows appends to duplicates is ignored). Use it when the adapter name is random |
 | `adapterNamePrefixes` | yes* | Adapter name prefixes, at least 3 characters (`happ-`) |
 | `mainProcesses` | no | Exe names used to find the client folder among running processes |
 | `defaultInstallDirs` | no | Client folders when it is not running; environment variables allowed |

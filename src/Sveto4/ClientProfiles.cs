@@ -34,8 +34,17 @@ namespace Sveto4
         public bool BuiltIn;
 
         public bool MatchesAdapter(string name, string description) =>
-            AdapterDescriptions.Any(d => string.Equals(d, description, StringComparison.OrdinalIgnoreCase))
+            AdapterDescriptions.Any(d => string.Equals(BaseDescription(d), BaseDescription(description), StringComparison.OrdinalIgnoreCase))
             || AdapterNamePrefixes.Any(p => name != null && name.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+
+        private static readonly Regex InstanceSuffix = new Regex(@"\s+#\d+$");
+
+        /// <summary>
+        /// Windows appends " #N" to the description of the second and later adapters with the same
+        /// driver description (e.g. "WireGuard Tunnel #57"); profiles match the description without it.
+        /// </summary>
+        public static string BaseDescription(string description) =>
+            description == null ? null : InstanceSuffix.Replace(description.Trim(), "");
 
         public bool IsExcluded(string exePath)
         {

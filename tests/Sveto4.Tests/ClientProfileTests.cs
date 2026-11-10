@@ -43,6 +43,14 @@ namespace Sveto4.Tests
             Assert.Equal(expected, Happ.MatchesAdapter(name, description));
 
         [Theory]
+        [InlineData("Happ Tunnel #2", true)]
+        [InlineData("Happ Tunnel #57", true)]
+        [InlineData("Happ Tunnel 2", false)]     // only the " #N" suffix Windows adds is ignored
+        [InlineData("Happ Tunnel #x", false)]
+        public void MatchesAdapter_IgnoresInstanceNumber(string description, bool expected) =>
+            Assert.Equal(expected, Happ.MatchesAdapter("Ethernet 5", description));
+
+        [Theory]
         [InlineData(@"C:\Happ\unins000.exe", true)]
         [InlineData(@"C:\Happ\vc_redist.x64.exe", true)]
         [InlineData(@"C:\Happ\core\xray.exe", false)]
