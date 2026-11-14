@@ -58,9 +58,12 @@ jobs:
           name: sveto4
           path: out
 
-      - uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            out/sveto4.exe
-            out/sveto4.exe.sha256
-          generate_release_notes: true
+      # GitHub CLI (preinstalled on the runner) instead of a third-party action:
+      # the release job has write access to the repository.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          out/sveto4.exe out/sveto4.exe.sha256
+          --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
