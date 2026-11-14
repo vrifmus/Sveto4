@@ -68,7 +68,7 @@ namespace Sveto4
             AppDataDir.Trust(Dir);
             var file = System.IO.Path.Combine(Dir, id + ".json");
             AppDataDir.Trust(file); // an existing file keeps its permissions when overwritten
-            File.WriteAllText(file, json);
+            AtomicFile.WriteAllText(file, json);
         }
 
         public void Delete(string id)
@@ -162,7 +162,7 @@ namespace Sveto4
                 return;
             }
             AppDataDir.Trust(DisabledFile);
-            File.WriteAllLines(DisabledFile, rules.Select(r => r.Kind + "\t" + r.RuleName));
+            AtomicFile.WriteAllLines(DisabledFile, rules.Select(r => r.Kind + "\t" + r.RuleName));
         }
 
         public bool BlockSystemLeaks
@@ -198,14 +198,20 @@ namespace Sveto4
                 .LastOrDefault();
         }
 
+        private static readonly object SettingsSync = new object();
+
+        /// <summary>Read-modify-write under a lock: settings are written from worker threads.</summary>
         private static void WriteSetting(string key, string value)
         {
-            AppDataDir.Trust(SettingsFile);
-            var lines = File.Exists(SettingsFile)
-                ? File.ReadAllLines(SettingsFile).Where(l => !l.StartsWith(key + "=")).ToList()
-                : new List<string>();
-            lines.Add(key + "=" + value);
-            File.WriteAllLines(SettingsFile, lines);
+            lock (SettingsSync)
+            {
+                AppDataDir.Trust(SettingsFile);
+                var lines = File.Exists(SettingsFile)
+                    ? File.ReadAllLines(SettingsFile).Where(l => !l.StartsWith(key + "=")).ToList()
+                    : new List<string>();
+                lines.Add(key + "=" + value);
+                AtomicFile.WriteAllLines(SettingsFile, lines);
+            }
         }
     }
 }

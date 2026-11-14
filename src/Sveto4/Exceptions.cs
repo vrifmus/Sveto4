@@ -325,7 +325,7 @@ namespace Sveto4
         public void Save(List<ExceptionEntry> entries)
         {
             AppDataDir.Trust(FilePath);
-            File.WriteAllText(FilePath, Exceptions.Serialize(entries));
+            AtomicFile.WriteAllText(FilePath, Exceptions.Serialize(entries));
         }
     }
 }
