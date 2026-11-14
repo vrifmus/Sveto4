@@ -115,12 +115,49 @@ namespace Sveto4.Tests
         }
 
         [Theory]
-        [InlineData(AutostartStatus.On, true, "\t⚠ Writable folder")]
-        [InlineData(AutostartStatus.On, false, "")]
-        [InlineData(AutostartStatus.Off, true, "")]       // nothing runs elevated yet
-        [InlineData(AutostartStatus.OtherCopy, true, "\tother copy")]
-        [InlineData(AutostartStatus.Broken, false, "\t⚠ Not found")]
-        public void MenuSuffix(object status, bool writable, string expected) =>
-            Assert.Equal(expected, Autostart.MenuSuffix((AutostartStatus)status, writable));
+        [InlineData(AutostartStatus.On, ExeExposure.Folder, "\t⚠ Writable folder")]
+        [InlineData(AutostartStatus.On, ExeExposure.Exe, "\t⚠ Writable exe")]
+        [InlineData(AutostartStatus.On, ExeExposure.None, "")]
+        [InlineData(AutostartStatus.Off, ExeExposure.Folder, "")]       // nothing runs elevated yet
+        [InlineData(AutostartStatus.OtherCopy, ExeExposure.Folder, "\tother copy")]
+        [InlineData(AutostartStatus.Broken, ExeExposure.None, "\t⚠ Not found")]
+        public void MenuSuffix(object status, object exposure, string expected) =>
+            Assert.Equal(expected, Autostart.MenuSuffix((AutostartStatus)status, (ExeExposure)exposure));
+
+        [Fact]
+        public void CheckExe_WritableFolder_NotReset()
+        {
+            var resets = 0;
+            Assert.Equal(ExeExposure.Folder,
+                Autostart.CheckExe(Exe, dir => false, file => false, file => { resets++; return true; }));
+            Assert.Equal(0, resets); // someone else's folder is never changed
+        }
+
+        [Fact]
+        public void CheckExe_AdminOnly_NotReset()
+        {
+            var resets = 0;
+            Assert.Equal(ExeExposure.None,
+                Autostart.CheckExe(Exe, dir => true, file => true, file => { resets++; return true; }));
+            Assert.Equal(0, resets);
+        }
+
+        [Fact]
+        public void CheckExe_WritableExe_ResetToFolderPermissions()
+        {
+            var adminOnly = false;
+            string reset = null;
+            Assert.Equal(ExeExposure.None,
+                Autostart.CheckExe(Exe, dir => true, file => adminOnly, file => { reset = file; adminOnly = true; return true; }));
+            Assert.Equal(Exe, reset);
+        }
+
+        [Fact]
+        public void CheckExe_ResetFailed_Exe()
+        {
+            Assert.Equal(ExeExposure.Exe, Autostart.CheckExe(Exe, dir => true, file => false, file => false));
+            // Reset reported success, but the file is still exposed.
+            Assert.Equal(ExeExposure.Exe, Autostart.CheckExe(Exe, dir => true, file => false, file => true));
+        }
     }
 }

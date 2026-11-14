@@ -22,6 +22,16 @@ namespace Sveto4
         Broken,
     }
 
+    /// <summary>What programs without administrator rights can change on the way to this exe.</summary>
+    internal enum ExeExposure
+    {
+        None,
+        /// <summary>The exe file itself, while its folder is administrators-only.</summary>
+        Exe,
+        /// <summary>Its folder or a folder above.</summary>
+        Folder,
+    }
+
     /// <summary>Access to Windows Task Scheduler (replaced by a fake in tests).</summary>
     internal interface ITaskScheduler
     {
@@ -60,26 +70,52 @@ namespace Sveto4
         public string ExePath => exePath;
 
         /// <summary>Text after "Start with Windows" in the menu.</summary>
-        public static string MenuSuffix(AutostartStatus status, bool exeWritable) =>
+        public static string MenuSuffix(AutostartStatus status, ExeExposure exposure) =>
             status == AutostartStatus.OtherCopy ? "\tother copy"
             : status == AutostartStatus.Broken ? "\t⚠ Not found"
-            : status == AutostartStatus.On && exeWritable ? "\t⚠ Writable folder"
+            : status != AutostartStatus.On ? ""
+            : exposure == ExeExposure.Folder ? "\t⚠ Writable folder"
+            : exposure == ExeExposure.Exe ? "\t⚠ Writable exe"
             : "";
 
         /// <summary>
-        /// The exe, its folder or a folder above can be changed without administrator rights. Autostart runs
-        /// the exe elevated without a UAC prompt, so any program could then replace it and gain administrator rights.
+        /// Whether programs without administrator rights can replace the exe. Autostart runs it elevated without
+        /// a UAC prompt, so any program could then gain administrator rights. If only the file itself is exposed,
+        /// its permissions are reset to the folder's (<paramref name="tryReset"/>): a file copied in with Explorer
+        /// is owned by the user, and the inherited CREATOR OWNER entry gives that user full access.
+        /// Someone else's folder is never changed.
         /// </summary>
-        public static bool IsWritableByUsers(string exePath)
+        public static ExeExposure CheckExe(string exePath, Func<string, bool> isAdminOnlyFolder,
+                                           Func<string, bool> isAdminOnlyItem, Func<string, bool> tryReset)
+        {
+            if (!isAdminOnlyFolder(Path.GetDirectoryName(exePath))) return ExeExposure.Folder;
+            if (isAdminOnlyItem(exePath)) return ExeExposure.None;
+            return tryReset(exePath) && isAdminOnlyItem(exePath) ? ExeExposure.None : ExeExposure.Exe;
+        }
+
+        public static ExeExposure CheckExe(string exePath)
         {
             try
             {
-                return !FolderSecurity.IsAdminOnlyFolder(Path.GetDirectoryName(exePath)) || !FolderSecurity.IsAdminOnlyItem(exePath);
+                return CheckExe(exePath, FolderSecurity.IsAdminOnlyFolder, FolderSecurity.IsAdminOnlyItem, path =>
+                {
+                    try
+                    {
+                        FolderSecurity.ResetItem(path);
+                        Log.Info("Permissions reset (could be changed without administrator rights): " + path);
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "reset permissions of " + path);
+                        return false;
+                    }
+                });
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "read permissions of " + exePath);
-                return true;
+                return ExeExposure.Folder;
             }
         }
 

@@ -107,12 +107,23 @@ namespace Sveto4
         /// </summary>
         public static void ResetItem(string path)
         {
+            // The owner is written first: re-inheriting resolves CREATOR OWNER entries to the current owner.
+            var isDir = Directory.Exists(path);
+            var owner = isDir ? (FileSystemSecurity)new DirectorySecurity() : new FileSecurity();
+            owner.SetOwner(new SecurityIdentifier(AdministratorsSid));
+            Write(path, owner);
+
             var security = Read(path);
             foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier)))
                 security.RemoveAccessRuleSpecific(rule);
             security.SetAccessRuleProtection(false, false);
-            security.SetOwner(new SecurityIdentifier(AdministratorsSid));
             // SetNamedSecurityInfo drops stale inherited entries and re-inherits from the parent.
+            Write(path, security);
+        }
+
+        /// <summary>Writes only the sections changed in <paramref name="security"/>.</summary>
+        private static void Write(string path, FileSystemSecurity security)
+        {
             if (security is DirectorySecurity dir) Directory.SetAccessControl(path, dir);
             else File.SetAccessControl(path, (FileSecurity)security);
         }

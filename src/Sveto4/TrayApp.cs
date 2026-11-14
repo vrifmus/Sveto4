@@ -48,8 +48,8 @@ namespace Sveto4
         private readonly Autostart autostart = Autostart.CreateDefault();
         private AutostartStatus autostartStatus = AutostartStatus.Unknown;
         private bool autostartBusy;
-        /// <summary>This exe can be replaced without administrator rights (see <see cref="Autostart.IsWritableByUsers"/>).</summary>
-        private bool exeWritable;
+        /// <summary>Whether this exe can be replaced without administrator rights (see <see cref="Autostart.CheckExe(string)"/>).</summary>
+        private ExeExposure exeExposure;
         private readonly System.Windows.Forms.Timer pollTimer = new System.Windows.Forms.Timer { Interval = PollIntervalMs };
         private readonly System.Windows.Forms.Timer animTimer = new System.Windows.Forms.Timer { Interval = 15 };
         private readonly Icons icons = new Icons();
@@ -341,16 +341,23 @@ namespace Sveto4
         private void OnAutostartClick()
         {
             var on = autostartStatus != AutostartStatus.On;
-            if (on && exeWritable)
+            if (on && exeExposure != ExeExposure.None)
             {
+                var problem = exeExposure == ExeExposure.Exe
+                    ? "Programs without administrator rights can change sveto4.exe itself, and its permissions " +
+                      "could not be fixed (see the log):\n" + autostart.ExePath
+                    : "Sveto4 is in a folder that programs without administrator rights can change:\n" +
+                      System.IO.Path.GetDirectoryName(autostart.ExePath);
+                var advice = exeExposure == ExeExposure.Exe
+                    ? "Give the file to Administrators and reset its permissions first."
+                    : @"Move sveto4.exe to a folder like C:\Program Files\Sveto4 first.";
                 using (var owner = DialogOwner())
                 {
                     if (MessageBox.Show(owner,
-                            "Sveto4 is in a folder that programs without administrator rights can change:\n" +
-                            System.IO.Path.GetDirectoryName(autostart.ExePath) + "\n\n" +
+                            problem + "\n\n" +
                             "Start with Windows runs it with administrator rights and no UAC prompt, so any program " +
                             "could replace sveto4.exe and gain administrator rights at the next logon.\n\n" +
-                            @"Move sveto4.exe to a folder like C:\Program Files\Sveto4 first. Turn it on anyway?",
+                            advice + " Turn it on anyway?",
                             "Sveto4", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
                         return;
                 }
@@ -383,7 +390,7 @@ namespace Sveto4
                         Log.Error(ex, what ?? "autostart");
                     }
                 });
-                exeWritable = await Task.Run(() => Autostart.IsWritableByUsers(autostart.ExePath));
+                exeExposure = await Task.Run(() => Autostart.CheckExe(autostart.ExePath));
                 autostartStatus = await Task.Run(() => autostart.GetStatus());
             }
             catch (Exception ex)
@@ -485,7 +492,7 @@ namespace Sveto4
 
             miAutostart.Checked = autostartStatus == AutostartStatus.On;
             miAutostart.Enabled = autostartStatus != AutostartStatus.Unknown;
-            miAutostart.Text = "Start with Windows" + Autostart.MenuSuffix(autostartStatus, exeWritable);
+            miAutostart.Text = "Start with Windows" + Autostart.MenuSuffix(autostartStatus, exeExposure);
 
             BuildClientsMenu();
             BuildInterfacesMenu();

@@ -20,7 +20,7 @@ Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to
 
 ## Download and run
 
-Download `sveto4.exe` from [Releases](../../releases) and put it in a folder only administrators can write to, for example `C:\Program Files\Sveto4\` (see [Security and limitations](#security-and-limitations)). The app asks for administrator rights.
+Download `sveto4.exe` from [Releases](../../releases) and put it in a folder only administrators can write to, for example `C:\Program Files\Sveto4\` (see [Security and limitations](#security-and-limitations)). The app asks for administrator rights. A file copied there with Explorer belongs to your account and keeps full access for it; the app fixes that on start (gives the file to Administrators and resets its permissions to the folder's, logged as `Permissions reset`).
 
 - Only one copy runs at a time. A copy is recognised by a mutex owned by administrators: if a program without administrator rights creates a mutex with the same name, Sveto4 still starts and writes a warning to the log.
 - `--auto-enable` turns the Kill Switch on at startup. "Start with Windows" does not use it.
@@ -54,7 +54,7 @@ dotnet test        # unit tests, they never touch the real firewall
 - **Reset ALL**: removes all `KS-*` rules (interfaces, profiles, LAN, WSL, exceptions) and disables profiles and exceptions; their definitions are kept. The Kill Switch stays as it is: if it is on, all traffic stays blocked. System leak blocking and autostart are not touched.
 - **Block system leaks**: while the Kill Switch is on, disables built-in Windows rules that let traffic bypass it (see [System leaks](#system-leaks)).
 - **Other Allow rules (N)**: shown while the Kill Switch is on. Read-only list of enabled outbound Allow rules that programs added (not built into Windows, not the app's own). Each lets its program reach the network outside the VPN; disable the ones you do not need in Windows Defender Firewall (`wf.msc`).
-- **Start with Windows**: a Task Scheduler task that starts the app at logon with highest privileges (no UAC prompt). If the exe is moved, the task follows it on the next start. If the exe is in a folder that programs without administrator rights can change, the item is marked `⚠ Writable folder` and turning it on asks for confirmation.
+- **Start with Windows**: a Task Scheduler task that starts the app at logon with highest privileges (no UAC prompt). If the exe is moved, the task follows it on the next start. If programs without administrator rights can change the exe's folder, the item is marked `⚠ Writable folder`; if they can change the exe itself and its permissions could not be fixed, `⚠ Writable exe`. In both cases turning it on asks for confirmation.
 - **Exit**: the Kill Switch **stays on** after exit or a crash. That is the point of a Kill Switch.
 
 ## VPN client profiles
