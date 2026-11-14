@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32;
 
 namespace Sveto4
@@ -35,6 +36,38 @@ namespace Sveto4
             using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
                 return key?.GetValue("AppsUseLightTheme") is int light && light == 0;
         }
+
+        /// <summary>
+        /// Repaints the popup menu windows (class "#32768") of this thread, so items changed while a
+        /// menu is open are drawn in their new state without waiting for the mouse to pass over them.
+        /// </summary>
+        public static void RedrawOpenMenus()
+        {
+            EnumThreadWindows(GetCurrentThreadId(), (hwnd, lParam) =>
+            {
+                var name = new StringBuilder(16);
+                if (IsWindowVisible(hwnd) && GetClassName(hwnd, name, name.Capacity) > 0 && name.ToString() == "#32768")
+                    InvalidateRect(hwnd, IntPtr.Zero, true);
+                return true;
+            }, IntPtr.Zero);
+        }
+
+        private delegate bool EnumThreadWndProc(IntPtr hwnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumThreadWindows(uint threadId, EnumThreadWndProc callback, IntPtr lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int maxCount);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool InvalidateRect(IntPtr hwnd, IntPtr rect, bool erase);
 
         [DllImport("uxtheme.dll", EntryPoint = "#135")]
         private static extern int SetPreferredAppMode(int mode);

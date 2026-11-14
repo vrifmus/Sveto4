@@ -149,7 +149,7 @@ Built-in Windows Allow rules still work while outbound traffic is blocked. The a
 
 ## Errors and log
 
-The menu shows the expected result right after a click, then re-reads the real state from the firewall; if the operation failed, it shows the actual state. No error dialogs are shown: errors go to `%ProgramData%\Sveto4\sveto4.log` (administrators-only folder, readable by everyone), together with operation timings and adapters that appear after startup.
+The menu shows the expected result right after a click, then re-reads the real state from the firewall; if the operation failed, it shows the actual state. While an operation is in progress (yellow icon), the items that change something are greyed out and become available again as soon as it ends, even in a menu that is already open; the lists (Rules, leaks, Other Allow rules), Start with Windows and Exit stay available. No error dialogs are shown: errors go to `%ProgramData%\Sveto4\sveto4.log` (administrators-only folder, readable by everyone), together with operation timings and adapters that appear after startup.
 
 The menu follows the Windows light/dark app mode (Windows 10 1903+).
 

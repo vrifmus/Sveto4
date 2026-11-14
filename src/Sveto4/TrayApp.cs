@@ -69,6 +69,8 @@ namespace Sveto4
         private string lastSyncSignature;
         private readonly System.Windows.Forms.Timer quickPollTimer = new System.Windows.Forms.Timer { Interval = 300 };
         private string lastTooltip;
+        /// <summary>Re-apply Enabled/Checked of the items built by the last UpdateMenu (see <see cref="Track"/>).</summary>
+        private readonly List<Action> menuRefreshers = new List<Action>();
 
         private Color currentColor = Yellow;
         private Color animFrom;
@@ -157,6 +159,7 @@ namespace Sveto4
             if (s != null) state = s;
             busy = false;
             ApplyState();
+            RefreshOpenMenu();
 
             if (autoEnable && state.Mode != KsMode.On)
                 Run("Auto-enable", () => ks.SetMode(true), st => KillSwitch.PredictMode(st, true));
@@ -245,6 +248,7 @@ namespace Sveto4
             if (s != null) state = s;
             busy = false;
             ApplyState();
+            RefreshOpenMenu();
         }
 
         private async void OnPoll()
@@ -457,8 +461,10 @@ namespace Sveto4
         private void UpdateMenu()
         {
             var on = state.Mode != KsMode.Off;
-            miBlockLeaks.Checked = state.BlockLeaks;
-            miBlockLeaks.Enabled = state.RulesLoaded;
+            menuRefreshers.Clear();
+            Track(miToggle, () => true);
+            Track(miOff, () => true);
+            Track(miBlockLeaks, () => state.RulesLoaded, () => state.BlockLeaks);
             miPartial.Visible = state.Mode == KsMode.Partial;
             miPartial.Text = "Partially on. Not blocked: " + state.NotBlocked + Warn;
             miToggle.Text = state.Mode == KsMode.On ? "Turn OFF"
@@ -466,18 +472,16 @@ namespace Sveto4
                           : "Turn ON";
             miOff.Visible = state.Mode == KsMode.Partial;
 
-            miLan.Checked = state.Lan;
-            miLan.Enabled = on;
-            miWsl.Checked = state.Wsl;
+            Track(miLan, () => state.Mode != KsMode.Off, () => state.Lan);
             // Kept clickable while on, so the rule can be turned off even if WSL was uninstalled.
-            miWsl.Enabled = on && (state.WslAvailable || state.Wsl);
+            Track(miWsl, () => state.Mode != KsMode.Off && (state.WslAvailable || state.Wsl), () => state.Wsl);
             miWsl.Text = "Allow WSL" + (state.WslAvailable || !state.RulesLoaded ? "" : "\tnot installed");
             miInterfaces.Enabled = on;
             miClients.Enabled = on;
             miExceptions.Enabled = on;
             miRules.Enabled = on;
             // Also available while off: removes rules left behind.
-            miReset.Enabled = state.RulesLoaded;
+            Track(miReset, () => state.RulesLoaded);
 
             miAutostart.Checked = autostartStatus == AutostartStatus.On;
             miAutostart.Enabled = autostartStatus != AutostartStatus.Unknown;
@@ -489,6 +493,38 @@ namespace Sveto4
             BuildRulesMenu();
             BuildLeaksMenu(on);
             BuildOtherRulesMenu(on);
+        }
+
+        /// <summary>
+        /// Sets an item that changes something: grey while an action runs (its click would be ignored).
+        /// The conditions read the current state, so <see cref="RefreshOpenMenu"/> can re-apply them.
+        /// </summary>
+        private void Track(MenuItem item, Func<bool> enabledWhenIdle, Func<bool> isChecked = null)
+        {
+            Action apply = () =>
+            {
+                item.Enabled = !busy && enabledWhenIdle();
+                if (isChecked != null) item.Checked = isChecked();
+            };
+            apply();
+            menuRefreshers.Add(apply);
+        }
+
+        /// <summary>
+        /// A menu opened during an action was built grey: re-enable its items in place when the action ends.
+        /// Texts (counts, Turn ON/OFF) are updated on the next opening.
+        /// </summary>
+        private void RefreshOpenMenu()
+        {
+            try
+            {
+                foreach (var refresh in menuRefreshers) refresh();
+                MenuTheme.RedrawOpenMenus();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "menu refresh");
+            }
         }
 
         private const int MaxOtherRules = 40;
@@ -558,17 +594,18 @@ namespace Sveto4
                 var profile = c.Profile;
                 // Not installed: still clickable when enabled, so it can be turned off.
                 var mark = c.InstallDir == null ? Warn + " Not found" : "";
-                miClients.MenuItems.Add(new MenuItem(profile.Name + mark, (s, e) => OnClientClick(profile))
-                {
-                    Checked = c.Enabled,
-                    Enabled = c.Enabled || c.InstallDir != null,
-                });
+                var item = new MenuItem(profile.Name + mark, (s, e) => OnClientClick(profile));
+                Track(item, () => Client(profile.Id) is ClientStatus x && (x.Enabled || x.InstallDir != null),
+                      () => Client(profile.Id)?.Enabled == true);
+                miClients.MenuItems.Add(item);
             }
             if (state.Clients.Count == 0)
                 miClients.MenuItems.Add(new MenuItem("No profiles") { Enabled = false });
 
             miClients.MenuItems.Add(new MenuItem("-"));
-            miClients.MenuItems.Add(new MenuItem("Import profile…", (s, e) => OnImportProfile()) { Enabled = !busy });
+            var import = new MenuItem("Import profile…", (s, e) => OnImportProfile());
+            Track(import, () => true);
+            miClients.MenuItems.Add(import);
             var imported = state.Clients.Where(c => !c.Profile.BuiltIn).Select(c => c.Profile).ToList();
             if (imported.Count > 0)
             {
@@ -576,11 +613,15 @@ namespace Sveto4
                 foreach (var p in imported)
                 {
                     var profile = p;
-                    remove.MenuItems.Add(new MenuItem(profile.Name, (s, e) => OnRemoveProfile(profile)));
+                    var item = new MenuItem(profile.Name, (s, e) => OnRemoveProfile(profile));
+                    Track(item, () => Client(profile.Id) != null);
+                    remove.MenuItems.Add(item);
                 }
                 miClients.MenuItems.Add(remove);
             }
         }
+
+        private ClientStatus Client(string id) => state.Clients.FirstOrDefault(c => c.Profile.Id == id);
 
         private void OnImportProfile()
         {
@@ -646,10 +687,9 @@ namespace Sveto4
             miInterfaces.Text = selected.Count > 0 ? $"Interfaces ({selected.Count})" : "Interfaces";
             miInterfaces.MenuItems.Clear();
 
-            miInterfaces.MenuItems.Add(new MenuItem("None", (s, e) => Run("Clear interfaces", ks.ClearInterfaces, KillSwitch.PredictClear))
-            {
-                Checked = selected.Count == 0,
-            });
+            var none = new MenuItem("None", (s, e) => Run("Clear interfaces", ks.ClearInterfaces, KillSwitch.PredictClear));
+            Track(none, () => true, () => state.Interfaces.Count == 0);
+            miInterfaces.MenuItems.Add(none);
             miInterfaces.MenuItems.Add(new MenuItem("-"));
 
             var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -667,11 +707,11 @@ namespace Sveto4
                          : !isSelected || (adapter != null && adapter.IsUp) ? ""
                          : adapter == null ? Warn + " Not found"
                          : Warn + " Disconnected";
-                miInterfaces.MenuItems.Add(new MenuItem(iface + mark, (s, e) => OnInterfaceClick(iface))
-                {
-                    Checked = isSelected,
-                    Enabled = client == null, // turn the profile off to remove it
-                });
+                var item = new MenuItem(iface + mark, (s, e) => OnInterfaceClick(iface));
+                // Managed by a profile: turn the profile off to remove it.
+                Track(item, () => !(state.Interfaces.Contains(iface) && state.ManagingClient(iface) != null),
+                      () => state.Interfaces.Contains(iface));
+                miInterfaces.MenuItems.Add(item);
             }
         }
 
@@ -686,23 +726,27 @@ namespace Sveto4
                 var entry = x.Entry;
                 var missing = entry.Program != null && !ProgramExists(entry.Program);
                 var mark = missing ? Warn + " Not found" : "\t" + Shorten(Exceptions.Describe(entry), 40);
-                miExceptions.MenuItems.Add(new MenuItem(entry.Name + mark, (s, e) => OnExceptionClick(entry))
-                {
-                    Checked = x.Enabled,
-                });
+                var item = new MenuItem(entry.Name + mark, (s, e) => OnExceptionClick(entry));
+                Track(item, () => HasException(entry.Name),
+                      () => state.Exceptions.Any(y => y.Enabled && y.Entry.Name == entry.Name));
+                miExceptions.MenuItems.Add(item);
             }
             if (state.Exceptions.Count == 0)
                 miExceptions.MenuItems.Add(new MenuItem("No exceptions") { Enabled = false });
 
             miExceptions.MenuItems.Add(new MenuItem("-"));
-            miExceptions.MenuItems.Add(new MenuItem("Add exception…", (s, e) => OnAddException()) { Enabled = !busy });
+            var add = new MenuItem("Add exception…", (s, e) => OnAddException());
+            Track(add, () => true);
+            miExceptions.MenuItems.Add(add);
             if (state.Exceptions.Count > 0)
             {
                 var edit = new MenuItem("Edit exception");
                 foreach (var x in state.Exceptions)
                 {
                     var entry = x.Entry;
-                    edit.MenuItems.Add(new MenuItem(entry.Name, (s, e) => OnEditException(entry)));
+                    var item = new MenuItem(entry.Name, (s, e) => OnEditException(entry));
+                    Track(item, () => HasException(entry.Name));
+                    edit.MenuItems.Add(item);
                 }
                 miExceptions.MenuItems.Add(edit);
 
@@ -710,11 +754,15 @@ namespace Sveto4
                 foreach (var x in state.Exceptions)
                 {
                     var entry = x.Entry;
-                    remove.MenuItems.Add(new MenuItem(entry.Name, (s, e) => OnRemoveException(entry)));
+                    var item = new MenuItem(entry.Name, (s, e) => OnRemoveException(entry));
+                    Track(item, () => HasException(entry.Name));
+                    remove.MenuItems.Add(item);
                 }
                 miExceptions.MenuItems.Add(remove);
             }
         }
+
+        private bool HasException(string name) => state.Exceptions.Any(x => x.Entry.Name == name);
 
         private static bool ProgramExists(string program)
         {
