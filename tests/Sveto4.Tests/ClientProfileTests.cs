@@ -219,6 +219,60 @@ namespace Sveto4.Tests
         }
 
         [Fact]
+        public void Sync_AfterClientUpdate_AddsNewAndRemovesGoneExecutables()
+        {
+            processes = new List<ProcessEntry> { new ProcessEntry { Name = "Happ.exe", ExePath = TestEnv.HappDir + @"\Happ.exe" } };
+            Create().EnableClient(Happ);
+            var xray = fw.Find("KS-App-happ-xray");
+
+            // The update drops sing-box and adds a new core.
+            var updated = TestEnv.HappFiles.Where(f => !f.EndsWith("sing-box.exe"))
+                .Concat(new[] { TestEnv.HappDir + @"\core\hysteria.exe" }).ToArray();
+            var ks = Create(updated);
+            var s = Read(ks);
+            Assert.True(KillSwitch.NeedsClientSync(s));
+            ks.SyncClients(s);
+
+            Assert.Contains(fw.Rules, r => r.Name == "KS-App-happ-hysteria");
+            Assert.DoesNotContain(fw.Rules, r => r.Name == "KS-App-happ-sing-box");
+            Assert.Same(xray, fw.Find("KS-App-happ-xray")); // unchanged rules are not re-created
+            Assert.False(KillSwitch.NeedsClientSync(Read(ks)));
+        }
+
+        [Fact]
+        public void Sync_ExecutableMoved_UpdatesItsRule()
+        {
+            processes = new List<ProcessEntry> { new ProcessEntry { Name = "Happ.exe", ExePath = TestEnv.HappDir + @"\Happ.exe" } };
+            Create().EnableClient(Happ);
+            var moved = TestEnv.HappFiles.Select(f => f.Replace(@"\core\xray.exe", @"\core2\xray.exe")).ToArray();
+            var ks = Create(moved);
+            ks.SyncClients(Read(ks));
+
+            Assert.Equal(TestEnv.HappDir + @"\core2\xray.exe", fw.Find("KS-App-happ-xray").ApplicationName);
+        }
+
+        [Fact]
+        public void UpToDateRules_NoSync()
+        {
+            processes = new List<ProcessEntry> { new ProcessEntry { Name = "Happ.exe", ExePath = TestEnv.HappDir + @"\Happ.exe" } };
+            var ks = Create();
+            ks.EnableClient(Happ);
+            Assert.False(Read(ks).Clients.Single(c => c.Profile.Id == "happ").AppRulesStale);
+        }
+
+        [Fact]
+        public void UninstalledClient_KeepsRules_NoSync()
+        {
+            processes = new List<ProcessEntry> { new ProcessEntry { Name = "Happ.exe", ExePath = TestEnv.HappDir + @"\Happ.exe" } };
+            Create().EnableClient(Happ);
+            processes = new List<ProcessEntry>();
+            var s = Read(Create(new string[0]));
+
+            Assert.False(s.Clients.Single(c => c.Profile.Id == "happ").AppRulesStale);
+            Assert.Contains(fw.Rules, r => r.Name == "KS-App-happ-xray");
+        }
+
+        [Fact]
         public void Disabled_NoSync()
         {
             var s = Read(Create());

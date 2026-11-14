@@ -503,7 +503,7 @@ namespace Sveto4
             string.Equals(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
 
         private static void SetClientEnabled(KsState n, string clientId, bool on) =>
-            n.Clients = n.Clients.Select(c => c.Profile.Id == clientId ? new ClientStatus(c.Profile, on, c.InstallDir, c.KnownAdapters) : c).ToList();
+            n.Clients = n.Clients.Select(c => c.Profile.Id == clientId ? new ClientStatus(c.Profile, on, c.InstallDir, c.KnownAdapters, c.AppRulesStale) : c).ToList();
 
         private static void MoveLeaks(List<LeakInfo> from, List<LeakInfo> to)
         {
@@ -608,13 +608,27 @@ namespace Sveto4
             (ports ?? "").Split(',').Any(p => p.Trim() == port);
 
         /// <summary>
-        /// True when an enabled client has adapters to add/remove, or its executable rules are missing
-        /// (e.g. the client was installed after the profile was enabled).
+        /// True when an enabled client has adapters to add/remove, or its executable rules do not match
+        /// its executables (e.g. the client was installed or updated after the profile was enabled).
         /// </summary>
         public static bool NeedsClientSync(KsState s) =>
-            s.Clients.Where(c => c.Enabled).Any(c =>
-                !ClientProfiles.PlanAdapters(c.Profile, s).IsEmpty
-                || (c.InstallDir != null && !s.Rules.Any(r => r.Name.StartsWith(AppPrefix + c.Profile.Id + "-", StringComparison.OrdinalIgnoreCase))));
+            s.Clients.Where(c => c.Enabled).Any(c => c.AppRulesStale || !ClientProfiles.PlanAdapters(c.Profile, s).IsEmpty);
+
+        /// <summary>Changes that bring the client's executable rules (name → exe path) in line with the wanted ones.</summary>
+        public static AppRulePlan PlanAppRules(ClientProfile profile, IEnumerable<string> exePaths, IEnumerable<RuleProps> rules)
+        {
+            var prefix = AppPrefix + profile.Id + "-";
+            var wanted = AppRuleNames(profile, exePaths);
+            var existing = rules.Where(r => r.Name != null && r.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
+            bool Same(RuleProps r, KeyValuePair<string, string> w) =>
+                string.Equals(r.Name, w.Key, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(r.ApplicationName, w.Value, StringComparison.OrdinalIgnoreCase);
+
+            var plan = new AppRulePlan();
+            plan.ToRemove.AddRange(existing.Where(r => !wanted.Any(w => Same(r, w))).Select(r => r.Name));
+            plan.ToAdd.AddRange(wanted.Where(w => !existing.Any(r => Same(r, w))));
+            return plan;
+        }
 
         /// <summary>Rule names for client executables; duplicates in subfolders get a numeric suffix.</summary>
         public static List<KeyValuePair<string, string>> AppRuleNames(ClientProfile profile, IEnumerable<string> exePaths)
@@ -650,14 +664,21 @@ namespace Sveto4
             s.Leaks = FindLeaks(all.Where(r => r.IsOutboundAllow && r.Enabled));
             s.DisabledLeaks = store.LoadDisabledRules();
             s.BlockLeaks = store.BlockSystemLeaks;
-            s.Clients = Profiles()
-                .Select(p => new ClientStatus(p, IsClientEnabled(p, s.Rules), ClientProfiles.ResolveInstallDir(p, env),
-                                              store.GetClientAdapters(p.Id)))
-                .ToList();
+            s.Clients = Profiles().Select(p => ReadClient(p, s.Rules, all)).ToList();
             s.Exceptions = LoadExceptions()
                 .Select(e => new ExceptionStatus(e, s.Rules.Any(r => r.Enabled &&
                     string.Equals(r.Name, ExceptionRuleName(e), StringComparison.OrdinalIgnoreCase))))
                 .ToList();
+        }
+
+        private ClientStatus ReadClient(ClientProfile p, List<RuleInfo> ownRules, List<RuleProps> allRules)
+        {
+            var enabled = IsClientEnabled(p, ownRules);
+            var dir = ClientProfiles.ResolveInstallDir(p, env);
+            // An uninstalled client keeps its rules: they are removed when the profile is turned off.
+            var stale = enabled && dir != null
+                        && !PlanAppRules(p, ClientProfiles.ExecutablesToAllow(p, dir, env), allRules).IsEmpty;
+            return new ClientStatus(p, enabled, dir, store.GetClientAdapters(p.Id), stale);
         }
 
         /// <summary>Own Hyper-V firewall rules, shown together with the host rules.</summary>
@@ -945,14 +966,14 @@ namespace Sveto4
                 if (plan.ToSelect.Count + plan.ToDeselect.Count > 0)
                     Log.Info($"{c.Profile.Name} adapters: +[{string.Join(", ", plan.ToSelect)}] -[{string.Join(", ", plan.ToDeselect)}]");
 
-                var hasAppRules = s.Rules.Any(r => r.Name.StartsWith(AppPrefix + c.Profile.Id + "-", StringComparison.OrdinalIgnoreCase));
-                if (!hasAppRules && c.InstallDir != null) AddClientAppRules(c.Profile);
+                if (c.AppRulesStale) AddClientAppRules(c.Profile);
             }
         }
 
         /// <summary>
         /// Allows every executable in the client's install folder (not only running ones),
         /// so cores started later (e.g. sing-box) can reach the VPN server through the physical interface.
+        /// Only changed rules are touched, so a running client is not cut off while they are updated.
         /// </summary>
         private void AddClientAppRules(ClientProfile profile)
         {
@@ -963,9 +984,12 @@ namespace Sveto4
                 return;
             }
 
-            var appRules = AppPrefix + profile.Id + "-";
-            firewall.RemoveWhere(n => n.StartsWith(appRules, StringComparison.OrdinalIgnoreCase));
-            foreach (var rule in AppRuleNames(profile, ClientProfiles.ExecutablesToAllow(profile, dir, env)))
+            var plan = PlanAppRules(profile, ClientProfiles.ExecutablesToAllow(profile, dir, env), firewall.GetAllRules());
+            if (plan.IsEmpty) return;
+            var remove = new HashSet<string>(plan.ToRemove, StringComparer.OrdinalIgnoreCase);
+            if (remove.Count > 0) firewall.RemoveWhere(remove.Contains);
+            Log.Info($"{profile.Name} executable rules: +[{string.Join(", ", plan.ToAdd.Select(r => r.Key))}] -[{string.Join(", ", plan.ToRemove)}]");
+            foreach (var rule in plan.ToAdd)
             {
                 try
                 {

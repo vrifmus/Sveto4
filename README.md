@@ -144,7 +144,7 @@ Built-in Windows Allow rules still work while outbound traffic is blocked. The a
 - **Autostart runs the exe with administrator rights and no UAC prompt.** Keep the app in a folder only administrators can write to, such as `C:\Program Files\Sveto4\`. Otherwise any program could replace `sveto4.exe` and gain administrator rights at the next logon.
 - **The exe is not code-signed**, so SmartScreen may warn on first run. Release builds are produced by GitHub Actions from this repository's source.
 - Only the four system rules above are handled. Other built-in Allow rules (Store, Remote Assistance, etc.) stay active.
-- Client executable rules are created when the profile is enabled. If the client is reinstalled to another folder, disable and enable the profile again.
+- Client executable rules follow the client folder: when an update adds, removes or moves an exe, the rules are updated within about 30 seconds (logged as `executable rules: +[…] -[…]`). A client that was uninstalled keeps its rules until the profile is turned off.
 
 ## Errors and log
 

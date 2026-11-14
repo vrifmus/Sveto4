@@ -60,11 +60,13 @@ namespace Sveto4
     /// <summary>Client state shown in the menu.</summary>
     internal sealed class ClientStatus
     {
-        public ClientStatus(ClientProfile profile, bool enabled, string installDir, IEnumerable<string> knownAdapters = null)
+        public ClientStatus(ClientProfile profile, bool enabled, string installDir, IEnumerable<string> knownAdapters = null,
+                            bool appRulesStale = false)
         {
             Profile = profile;
             Enabled = enabled;
             InstallDir = installDir;
+            AppRulesStale = appRulesStale;
             KnownAdapters = new HashSet<string>(knownAdapters ?? new string[0], StringComparer.OrdinalIgnoreCase);
         }
 
@@ -72,6 +74,11 @@ namespace Sveto4
         public bool Enabled { get; }
         /// <summary>Null when the client is not found on this machine.</summary>
         public string InstallDir { get; }
+        /// <summary>
+        /// The executable rules do not match the executables in the install folder
+        /// (e.g. the client was installed or updated after the profile was enabled).
+        /// </summary>
+        public bool AppRulesStale { get; }
         /// <summary>Adapters selected on behalf of this client (recognized even after they vanish).</summary>
         public HashSet<string> KnownAdapters { get; }
     }
@@ -89,6 +96,14 @@ namespace Sveto4
         public Func<string, bool> IsAdminOnlyFolder;
         /// <summary>The file or folder itself can be changed by administrators only; false if unreadable.</summary>
         public Func<string, bool> IsAdminOnlyItem;
+    }
+
+    /// <summary>Executable rule changes for a client: rules to add (name → exe path) and rule names to remove.</summary>
+    internal sealed class AppRulePlan
+    {
+        public List<KeyValuePair<string, string>> ToAdd = new List<KeyValuePair<string, string>>();
+        public List<string> ToRemove = new List<string>();
+        public bool IsEmpty => ToAdd.Count == 0 && ToRemove.Count == 0;
     }
 
     /// <summary>Adapter changes needed to keep a client's tunnel adapters allowed.</summary>
