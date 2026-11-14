@@ -4,7 +4,7 @@
 
 ![Sveto4 tray menu and tooltip](docs/screenshot.png)
 
-A VPN Kill Switch for Windows that lives in the system tray. It blocks all outbound traffic with Windows Firewall, except through the network interfaces you allow. It is meant for VPN clients that have no Kill Switch of their own, or one that is hard to set up. Tested with **Happ** (built-in profile), **NekoBox**, **INCY** and **AmneziaVPN** (sample profiles).
+A VPN Kill Switch for Windows that lives in the system tray. It blocks all outbound traffic with Windows Firewall, except through the network interfaces you allow. It is meant for VPN clients that have no Kill Switch of their own, or one that is hard to set up. Tested with **Happ** (built-in profile), and with **NekoBox**, **INCY** and **AmneziaVPN** (AmneziaWG protocol only) via sample profiles.
 
 Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to install. The original PowerShell version is kept in `legacy/`.
 
