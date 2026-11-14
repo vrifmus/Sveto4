@@ -65,40 +65,69 @@ namespace Sveto4.Tests
         }
 
         [Fact]
-        public void SetLan_CreatesThenTogglesSubnetRules()
+        public void SetLan_CreatesThenRemovesRules()
         {
             var ks = Create();
 
             ks.SetLan(true);
-            Assert.Equal(KillSwitch.LanSubnets.Count, fw.Rules.Count);
+            Assert.Equal(new[] { "KS-LAN-Allow-ICMPv4", "KS-LAN-Allow-ICMPv6", "KS-LAN-Allow-TCP", "KS-LAN-Allow-UDP" }, RuleNames());
             Assert.All(fw.Rules, r => Assert.True(r.Enabled));
-            Assert.Equal("10.0.0.0/255.0.0.0", fw.Find("KS-LAN-Allow-10.0.0.0/8").RemoteAddresses);
+            Assert.True(Read(ks).Lan);
 
             ks.SetLan(false);
-            Assert.Equal(KillSwitch.LanSubnets.Count, fw.Rules.Count);
-            Assert.All(fw.Rules, r => Assert.False(r.Enabled));
+            Assert.Empty(fw.Rules);
+            Assert.False(Read(ks).Lan);
         }
 
         [Fact]
-        public void Lan_IncludesIpv6LinkLocal()
+        public void Lan_ExcludesDnsPorts()
         {
             Create().SetLan(true);
-            Assert.Equal("fe80::/10", fw.Find("KS-LAN-Allow-fe80::/10").RemoteAddresses);
+            foreach (var name in new[] { "KS-LAN-Allow-TCP", "KS-LAN-Allow-UDP" })
+            {
+                var ports = fw.Find(name).RemotePorts;
+                Assert.Equal("1-52,54-852,854-65535", ports);
+            }
+            Assert.Equal(6, fw.Find("KS-LAN-Allow-TCP").Protocol);
+            Assert.Equal(17, fw.Find("KS-LAN-Allow-UDP").Protocol);
         }
 
         [Fact]
-        public void LanSync_AddsSubnetMissingFromOlderVersion()
+        public void Lan_SubnetsIncludeIpv6LinkLocal_IcmpSplitByFamily()
         {
+            Create().SetLan(true);
+            Assert.Contains("fe80::/10", fw.Find("KS-LAN-Allow-TCP").RemoteAddresses);
+            Assert.Contains("192.168.0.0/255.255.0.0", fw.Find("KS-LAN-Allow-UDP").RemoteAddresses);
+            Assert.Equal(1, fw.Find("KS-LAN-Allow-ICMPv4").Protocol);
+            Assert.DoesNotContain(":", fw.Find("KS-LAN-Allow-ICMPv4").RemoteAddresses);
+            Assert.Equal(58, fw.Find("KS-LAN-Allow-ICMPv6").Protocol);
+            Assert.DoesNotContain(".", fw.Find("KS-LAN-Allow-ICMPv6").RemoteAddresses);
+        }
+
+        [Fact]
+        public void LanSync_ReplacesRulesOfOlderVersion()
+        {
+            // Older versions: one rule per subnet, any protocol (DNS to the router allowed).
+            fw.Rules.Add(new RuleSpec { Name = "KS-LAN-Allow-192.168.0.0/16", RemoteAddresses = "192.168.0.0/255.255.0.0" });
+            fw.Rules.Add(new RuleSpec { Name = "KS-LAN-Allow-10.0.0.0/8", RemoteAddresses = "10.0.0.0/255.0.0.0" });
             var ks = Create();
-            ks.SetLan(true);
-            fw.Rules.RemoveAll(r => r.Name == "KS-LAN-Allow-fe80::/10"); // created by an older version
             var s = Read(ks);
+            Assert.True(s.Lan);
             Assert.True(KillSwitch.NeedsLanSync(s));
 
             ks.SetLan(true);
 
             Assert.False(KillSwitch.NeedsLanSync(Read(ks)));
-            Assert.Equal(KillSwitch.LanSubnets.Count, fw.Rules.Count);
+            Assert.Equal(new[] { "KS-LAN-Allow-ICMPv4", "KS-LAN-Allow-ICMPv6", "KS-LAN-Allow-TCP", "KS-LAN-Allow-UDP" }, RuleNames());
+        }
+
+        [Fact]
+        public void LanSync_RestoresMissingRule()
+        {
+            var ks = Create();
+            ks.SetLan(true);
+            fw.Rules.RemoveAll(r => r.Name == "KS-LAN-Allow-UDP");
+            Assert.True(KillSwitch.NeedsLanSync(Read(ks)));
         }
 
         [Fact]
@@ -107,7 +136,6 @@ namespace Sveto4.Tests
             var ks = Create();
             ks.SetLan(true);
             ks.SetLan(false);
-            fw.Rules.RemoveAll(r => r.Name == "KS-LAN-Allow-fe80::/10");
             Assert.False(KillSwitch.NeedsLanSync(Read(ks)));
         }
 

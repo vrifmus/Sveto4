@@ -15,7 +15,7 @@ Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to
 - **Automatic tunnel adapters.** A new TUN adapter, even with a random name like `tun_<random>`, is allowed as soon as it appears; a vanished one is removed.
 - **System leak blocking.** Built-in Windows rules that can leak traffic (DNS, IPv6, Teredo, IP-HTTPS) are disabled while blocking and restored afterwards. Optional.
 - **Exceptions.** Allow specific addresses past the Kill Switch, optionally for one program and port, e.g. SSH to the VPN server itself.
-- **LAN and WSL toggles.** Allow LAN (including `fe80::/10`) and Allow WSL (via a Hyper-V firewall rule, not by allowing all system traffic).
+- **LAN and WSL toggles.** Allow LAN (including `fe80::/10`, without DNS to the router) and Allow WSL (via a Hyper-V firewall rule, not by allowing all system traffic).
 - **Small and native.** One small exe on .NET Framework 4.8, built into Windows 10/11. Tray menu follows the light/dark theme; firewall profiles that disagree are shown as "partially on".
 
 ## Download and run
@@ -45,7 +45,7 @@ dotnet test        # unit tests, they never touch the real firewall
 ## Tray menu
 
 - **Turn ON / OFF**: blocks or allows outbound traffic by default in all firewall profiles (Domain, Private, Public).
-- **Allow LAN**: allows private subnets (`192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`, `fc00::/7`) and IPv6 link-local (`fe80::/10`).
+- **Allow LAN**: allows private subnets (`192.168.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`, `fc00::/7`) and IPv6 link-local (`fe80::/10`) over TCP, UDP and ICMP (rules `KS-LAN-Allow-TCP`, `-UDP`, `-ICMPv4`, `-ICMPv6`). DNS ports 53 and 853 are excluded: Windows also asks the DNS servers of every adapter, so the router would resolve names past the VPN and the provider would see them. DNS through the tunnel is not affected, it is allowed by the VPN adapter rule. Side effects: a DNS server in your LAN (e.g. Pi-hole) and protocols other than TCP, UDP and ICMP are not reachable through Allow LAN. Rules of older versions (one per subnet) are replaced automatically.
 - **Allow WSL**: lets WSL out through the Hyper-V firewall (rule `KS-WSL-Allow`, Windows 11 22H2+). WSL traffic then follows the same rules as Windows: it goes out only through the allowed interfaces (the VPN) and is blocked when the VPN is down.
 - **VPN clients**: client profiles (see below). An enabled profile allows the client's executables and selects its tunnel adapters automatically, including adapters with random names that change on every connection.
 - **Interfaces**: adapters that traffic may use (rule `KS-Allow-<name>`). Adapters managed by a profile are checked and greyed out, with the client name on the right. A selected adapter that is missing or disconnected is marked `⚠ Not found` / `⚠ Disconnected`; click it to deselect. **None** clears all interfaces and disables profiles.

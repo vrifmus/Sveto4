@@ -190,16 +190,30 @@ namespace Sveto4
         /// </summary>
         public const string LegacyNatRule = Prefix + "NAT-Allow";
 
-        // Rule name suffix (CIDR, as in the legacy version) -> firewall address.
-        public static readonly IReadOnlyDictionary<string, string> LanSubnets = new Dictionary<string, string>
+        // Private subnets in firewall form.
+        public const string LanIpv4 = "192.168.0.0/255.255.0.0,10.0.0.0/255.0.0.0,172.16.0.0/255.240.0.0";
+        // IPv6 unique local and link-local (not routable beyond the local link, used by some LAN devices).
+        public const string LanIpv6 = "fc00::/7,fe80::/10";
+
+        /// <summary>
+        /// Every port except DNS (53) and DNS over TLS/QUIC (853): otherwise the router would resolve names
+        /// past the VPN, and the provider would see them. DNS through the tunnel is allowed by the VPN adapter rule.
+        /// </summary>
+        public const string LanPorts = "1-52,54-852,854-65535";
+
+        /// <summary>
+        /// "Allow LAN" rules. Older versions had one rule per subnet with any protocol (KS-LAN-Allow-&lt;CIDR&gt;);
+        /// they are replaced by <see cref="NeedsLanSync"/>.
+        /// </summary>
+        public static readonly IReadOnlyList<RuleSpec> LanRules = new[]
         {
-            ["192.168.0.0/16"] = "192.168.0.0/255.255.0.0",
-            ["10.0.0.0/8"] = "10.0.0.0/255.0.0.0",
-            ["172.16.0.0/12"] = "172.16.0.0/255.240.0.0",
-            ["fc00::/7"] = "fc00::/7",
-            // IPv6 link-local: not routable beyond the local link, used by some LAN devices.
-            ["fe80::/10"] = "fe80::/10",
+            new RuleSpec { Name = LanPrefix + "TCP", RemoteAddresses = LanIpv4 + "," + LanIpv6, Protocol = 6, RemotePorts = LanPorts },
+            new RuleSpec { Name = LanPrefix + "UDP", RemoteAddresses = LanIpv4 + "," + LanIpv6, Protocol = 17, RemotePorts = LanPorts },
+            new RuleSpec { Name = LanPrefix + "ICMPv4", RemoteAddresses = LanIpv4, Protocol = 1 },
+            new RuleSpec { Name = LanPrefix + "ICMPv6", RemoteAddresses = LanIpv6, Protocol = 58 },
         };
+
+        private static bool IsLanRule(string name) => name.StartsWith(LanPrefix, StringComparison.OrdinalIgnoreCase);
 
         private static readonly string[] SystemAdapterMarkers =
         {
@@ -376,7 +390,8 @@ namespace Sveto4
         {
             var n = s.Clone();
             n.Lan = on;
-            foreach (var subnet in LanSubnets.Keys) SetRule(n, LanPrefix + subnet, on);
+            RemoveRules(n, IsLanRule);
+            if (on) foreach (var rule in LanRules) SetRule(n, rule.Name, true);
             return n;
         }
 
@@ -388,9 +403,14 @@ namespace Sveto4
             return n;
         }
 
-        /// <summary>"Allow LAN" is on, but some subnet rules are missing (e.g. a subnet added in a newer version).</summary>
-        public static bool NeedsLanSync(KsState s) =>
-            s.Lan && LanSubnets.Keys.Any(k => !s.Rules.Any(r => string.Equals(r.Name, LanPrefix + k, StringComparison.OrdinalIgnoreCase)));
+        /// <summary>"Allow LAN" is on, but its rules differ from <see cref="LanRules"/> (e.g. created by an older version).</summary>
+        public static bool NeedsLanSync(KsState s)
+        {
+            if (!s.Lan) return false;
+            var present = s.Rules.Where(r => IsLanRule(r.Name)).Select(r => r.Name).ToList();
+            return present.Count != LanRules.Count
+                   || LanRules.Any(w => !present.Contains(w.Name, StringComparer.OrdinalIgnoreCase));
+        }
 
         /// <summary>The legacy rule is present and has to be replaced.</summary>
         public static bool NeedsNatMigration(KsState s) =>
@@ -810,14 +830,16 @@ namespace Sveto4
             Log.Info("Restored system rules: " + string.Join("; ", records.Select(l => l.RuleName)));
         }
 
+        /// <summary>Re-creates the LAN rules on enable (also replaces rules of older versions), removes them on disable.</summary>
         public void SetLan(bool on)
         {
-            foreach (var subnet in LanSubnets)
-            {
-                var name = LanPrefix + subnet.Key;
-                if (firewall.Exists(name)) firewall.SetEnabled(name, on);
-                else firewall.AddOutboundAllow(new RuleSpec { Name = name, Enabled = on, RemoteAddresses = subnet.Value });
-            }
+            firewall.RemoveWhere(IsLanRule);
+            if (!on) return;
+            foreach (var rule in LanRules)
+                firewall.AddOutboundAllow(new RuleSpec
+                {
+                    Name = rule.Name, RemoteAddresses = rule.RemoteAddresses, Protocol = rule.Protocol, RemotePorts = rule.RemotePorts,
+                });
         }
 
         public void SetWsl(bool on)
