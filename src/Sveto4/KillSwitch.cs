@@ -58,7 +58,7 @@ namespace Sveto4
         public bool OutboundBlocked { get; }
     }
 
-    /// <summary>A system Allow rule that lets traffic bypass the kill switch.</summary>
+    /// <summary>A system Allow rule that lets traffic bypass the Kill Switch.</summary>
     internal sealed class LeakInfo
     {
         public LeakInfo(string kind, string ruleName)
@@ -80,7 +80,7 @@ namespace Sveto4
         public string ExePath;
     }
 
-    /// <summary>Immutable-by-convention snapshot of kill switch state. Replaced as a whole.</summary>
+    /// <summary>Immutable-by-convention snapshot of Kill Switch state. Replaced as a whole.</summary>
     internal sealed class KsState
     {
         public KsMode Mode = KsMode.Off;
@@ -95,14 +95,16 @@ namespace Sveto4
         /// <summary>WSL is installed and the Hyper-V firewall is available.</summary>
         public bool WslAvailable;
         public List<AdapterInfo> Adapters = new List<AdapterInfo>();
-        /// <summary>Enabled system rules that let traffic bypass the kill switch.</summary>
+        /// <summary>Enabled system rules that let traffic bypass the Kill Switch.</summary>
         public List<LeakInfo> Leaks = new List<LeakInfo>();
-        /// <summary>System rules disabled by the app while the kill switch is on.</summary>
+        /// <summary>System rules disabled by the app while the Kill Switch is on.</summary>
         public List<LeakInfo> DisabledLeaks = new List<LeakInfo>();
         /// <summary>"Block system leaks" setting.</summary>
         public bool BlockLeaks = true;
         /// <summary>VPN client profiles and whether they are enabled.</summary>
         public List<ClientStatus> Clients = new List<ClientStatus>();
+        /// <summary>User-defined exceptions and whether their rules are enabled.</summary>
+        public List<ExceptionStatus> Exceptions = new List<ExceptionStatus>();
 
         public bool IsClientEnabled(string clientId) => Clients.Any(c => c.Enabled && c.Profile.Id == clientId);
 
@@ -127,12 +129,14 @@ namespace Sveto4
             DisabledLeaks = new List<LeakInfo>(DisabledLeaks),
             BlockLeaks = BlockLeaks,
             Clients = new List<ClientStatus>(Clients),
+            Exceptions = new List<ExceptionStatus>(Exceptions),
         };
 
         public void CopyRulesFrom(KsState other)
         {
             RulesLoaded = other.RulesLoaded;
             Clients = other.Clients;
+            Exceptions = other.Exceptions;
             Leaks = other.Leaks;
             DisabledLeaks = other.DisabledLeaks;
             BlockLeaks = other.BlockLeaks;
@@ -145,7 +149,7 @@ namespace Sveto4
     }
 
     /// <summary>
-    /// Kill switch logic. Instance methods are blocking and must run off the UI thread.
+    /// Kill Switch logic. Instance methods are blocking and must run off the UI thread.
     /// Static methods are pure and covered by unit tests.
     /// Rule names are compatible with the legacy PowerShell version.
     /// </summary>
@@ -155,6 +159,8 @@ namespace Sveto4
         public const string AllowPrefix = Prefix + "Allow-";
         public const string AppPrefix = Prefix + "App-";
         public const string LanPrefix = Prefix + "LAN-Allow-";
+        /// <summary>User-defined exceptions: KS-Exc-{name}.</summary>
+        public const string ExceptionPrefix = Prefix + "Exc-";
         /// <summary>Hyper-V firewall rule that lets WSL out (then host rules decide: only via the VPN adapter).</summary>
         public const string WslRule = Prefix + "WSL-Allow";
         /// <summary>
@@ -185,10 +191,12 @@ namespace Sveto4
         private readonly IStateStore store;
         private readonly IHyperVFirewall hyperV;
         private readonly IProfileStore profileStore;
+        private readonly IExceptionStore exceptionStore;
 
         public KillSwitch(IFirewall firewall, ClientEnvironment env, IStateStore store, IHyperVFirewall hyperV = null,
-                          IProfileStore profileStore = null)
+                          IProfileStore profileStore = null, IExceptionStore exceptionStore = null)
         {
+            this.exceptionStore = exceptionStore;
             this.firewall = firewall;
             this.env = env;
             this.store = store;
@@ -198,7 +206,7 @@ namespace Sveto4
 
         public static KillSwitch CreateDefault() =>
             new KillSwitch(new ComFirewall(), ClientProfiles.CreateDefaultEnvironment(GetWmiProcesses), new FileStateStore(),
-                           new WmiHyperVFirewall(), new FileProfileStore());
+                           new WmiHyperVFirewall(), new FileProfileStore(), new FileExceptionStore());
 
         /// <summary>Built-in profiles followed by imported ones.</summary>
         public List<ClientProfile> Profiles()
@@ -214,6 +222,21 @@ namespace Sveto4
                 Log.Error(ex, "load profiles");
             }
             return result;
+        }
+
+        /// <summary>Stored exceptions; empty if the file cannot be read.</summary>
+        public List<ExceptionEntry> LoadExceptions()
+        {
+            if (exceptionStore == null) return new List<ExceptionEntry>();
+            try
+            {
+                return exceptionStore.Load();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "load exceptions");
+                return new List<ExceptionEntry>();
+            }
         }
 
         // ---------- Pure logic ----------
@@ -271,7 +294,7 @@ namespace Sveto4
 
             var head = string.Join("\n",
                 (icon != null ? StatusCircle(icon.Value) + " " : "") + "Sveto4",
-                "Kill switch: " + mode,
+                "Kill Switch: " + mode,
                 "LAN: " + OnOff(s.Lan),
                 "WSL: " + OnOff(s.Wsl),
                 "VPN clients: " + (s.Clients.Any(c => c.Enabled)
@@ -421,14 +444,55 @@ namespace Sveto4
             return n;
         }
 
+        /// <summary>Removes every own rule; the Kill Switch mode and system leak blocking stay as they are.</summary>
         public static KsState PredictReset(KsState s)
         {
-            var n = PredictClear(PredictMode(s, false));
+            var n = PredictClear(s);
             n.Lan = false;
             n.Wsl = false;
             n.Rules = new List<RuleInfo>();
+            n.Exceptions = n.Exceptions.Select(e => new ExceptionStatus(e.Entry, false)).ToList();
             return n;
         }
+
+        public static string ExceptionRuleName(ExceptionEntry e) => ExceptionPrefix + e.Name;
+
+        public static RuleSpec ExceptionRuleSpec(ExceptionEntry e) => new RuleSpec
+        {
+            Name = ExceptionRuleName(e),
+            RemoteAddresses = e.Addresses,
+            ApplicationName = e.Program,
+            Protocol = Exceptions.ProtocolNumber(e.Protocol),
+            RemotePorts = e.Ports,
+        };
+
+        public static KsState PredictException(KsState s, ExceptionEntry e, bool on)
+        {
+            var n = s.Clone();
+            var name = ExceptionRuleName(e);
+            if (on) SetRule(n, name, true);
+            else RemoveRules(n, r => string.Equals(r, name, StringComparison.OrdinalIgnoreCase));
+            n.Exceptions = n.Exceptions.Select(x => SameName(x.Entry, e) ? new ExceptionStatus(x.Entry, on) : x).ToList();
+            return n;
+        }
+
+        /// <summary>A new exception is enabled right away.</summary>
+        public static KsState PredictAddException(KsState s, ExceptionEntry e)
+        {
+            var n = s.Clone();
+            n.Exceptions.Add(new ExceptionStatus(e, false));
+            return PredictException(n, e, true);
+        }
+
+        public static KsState PredictRemoveException(KsState s, ExceptionEntry e)
+        {
+            var n = PredictException(s, e, false);
+            n.Exceptions = n.Exceptions.Where(x => !SameName(x.Entry, e)).ToList();
+            return n;
+        }
+
+        private static bool SameName(ExceptionEntry a, ExceptionEntry b) =>
+            string.Equals(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
 
         private static void SetClientEnabled(KsState n, string clientId, bool on) =>
             n.Clients = n.Clients.Select(c => c.Profile.Id == clientId ? new ClientStatus(c.Profile, on, c.InstallDir, c.KnownAdapters) : c).ToList();
@@ -486,7 +550,7 @@ namespace Sveto4
         private const int ProtocolIpv6 = 41;
 
         /// <summary>
-        /// Recognizes built-in "Core Networking" rules that let traffic bypass the kill switch.
+        /// Recognizes built-in "Core Networking" rules that let traffic bypass the Kill Switch.
         /// Matching is by properties, not by name, because rule names are localized.
         /// </summary>
         public static List<LeakInfo> FindLeaks(IEnumerable<RuleProps> enabledOutboundAllow)
@@ -501,8 +565,8 @@ namespace Sveto4
         }
 
         /// <summary>
-        /// True when system rules must be disabled (kill switch on, blocking enabled, leaks open)
-        /// or restored (kill switch off or blocking disabled, but some rules are still disabled by us).
+        /// True when system rules must be disabled (Kill Switch on, blocking enabled, leaks open)
+        /// or restored (Kill Switch off or blocking disabled, but some rules are still disabled by us).
         /// </summary>
         public static bool NeedsLeakReconcile(KsState s)
         {
@@ -512,6 +576,8 @@ namespace Sveto4
 
         public static string ClassifyLeak(RuleProps r)
         {
+            // Own rules are never leaks (e.g. an exception for svchost.exe must not be disabled).
+            if ((r.Name ?? "").StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)) return null;
             var svchost = (r.ApplicationName ?? "").EndsWith("svchost.exe", StringComparison.OrdinalIgnoreCase);
             var service = r.ServiceName ?? "";
 
@@ -580,6 +646,10 @@ namespace Sveto4
                 .Select(p => new ClientStatus(p, IsClientEnabled(p, s.Rules), ClientProfiles.ResolveInstallDir(p, env),
                                               store.GetClientAdapters(p.Id)))
                 .ToList();
+            s.Exceptions = LoadExceptions()
+                .Select(e => new ExceptionStatus(e, s.Rules.Any(r => r.Enabled &&
+                    string.Equals(r.Name, ExceptionRuleName(e), StringComparison.OrdinalIgnoreCase))))
+                .ToList();
         }
 
         /// <summary>Own Hyper-V firewall rules, shown together with the host rules.</summary>
@@ -621,7 +691,7 @@ namespace Sveto4
             else if (store.BlockSystemLeaks) BlockSystemLeaks();
         }
 
-        /// <param name="killSwitchActive">Kill switch is on (fully or partially).</param>
+        /// <param name="killSwitchActive">Kill Switch is on (fully or partially).</param>
         public void SetBlockLeaks(bool on, bool killSwitchActive)
         {
             store.BlockSystemLeaks = on;
@@ -715,9 +785,13 @@ namespace Sveto4
                                    || n.StartsWith(AppPrefix, StringComparison.OrdinalIgnoreCase));
         }
 
+        /// <summary>
+        /// Removes every own rule and disables client profiles. Does not change the Kill Switch mode:
+        /// when it is on, all traffic stays blocked until interfaces are selected again.
+        /// Exception definitions are kept (only their rules are removed).
+        /// </summary>
         public void ResetAll()
         {
-            SetMode(false);
             foreach (var profile in Profiles())
             {
                 store.SetClientEnabled(profile.Id, false);
@@ -732,6 +806,37 @@ namespace Sveto4
             {
                 Log.Error(ex, "remove " + WslRule);
             }
+        }
+
+        // ---------- Exceptions ----------
+
+        /// <summary>Validates, stores and enables a new exception. Throws <see cref="ExceptionValidationError"/>.</summary>
+        public ExceptionEntry AddException(string name, string addresses, string program, ExceptionProtocol protocol, string ports)
+        {
+            if (exceptionStore == null) throw new ExceptionValidationError("Exceptions cannot be stored.");
+            var entries = exceptionStore.Load();
+            var entry = Exceptions.Create(name, addresses, program, protocol, ports, entries.Select(e => e.Name));
+            entries.Add(entry);
+            exceptionStore.Save(entries);
+            SetExceptionEnabled(entry, true);
+            Log.Info($"Added exception {entry.Name}: {Exceptions.Describe(entry)}" + (entry.Program != null ? ", " + entry.Program : ""));
+            return entry;
+        }
+
+        public void SetExceptionEnabled(ExceptionEntry e, bool on)
+        {
+            var name = ExceptionRuleName(e);
+            // Re-created on enable, so the rule always matches the stored definition.
+            firewall.RemoveWhere(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+            if (on) firewall.AddOutboundAllow(ExceptionRuleSpec(e));
+        }
+
+        public void RemoveException(ExceptionEntry e)
+        {
+            SetExceptionEnabled(e, false);
+            if (exceptionStore == null) return;
+            exceptionStore.Save(exceptionStore.Load().Where(x => !SameName(x, e)).ToList());
+            Log.Info("Removed exception " + e.Name);
         }
 
         // ---------- VPN client profiles ----------

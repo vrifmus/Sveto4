@@ -14,13 +14,14 @@ namespace Sveto4.Tests
         private readonly FakeFirewall fw = new FakeFirewall();
         private readonly FakeStore store = new FakeStore();
         private readonly FakeHyperV hyperV = new FakeHyperV();
+        private readonly FakeExceptionStore exceptions = new FakeExceptionStore();
         private readonly KillSwitch ks;
 
         public PredictionTests()
         {
             fw.SystemRules.Add(LeakTests.Dns());
             fw.SystemRules.Add(LeakTests.Teredo);
-            ks = new KillSwitch(fw, TestEnv.Create(files: TestEnv.HappFiles, adapters: adapters), store, hyperV);
+            ks = new KillSwitch(fw, TestEnv.Create(files: TestEnv.HappFiles, adapters: adapters), store, hyperV, exceptionStore: exceptions);
         }
 
         private readonly List<AdapterInfo> adapters = new List<AdapterInfo>
@@ -53,6 +54,8 @@ namespace Sveto4.Tests
             Assert.Equal(Sorted(actual.Interfaces), Sorted(predicted.Interfaces));
             Assert.Equal(Sorted(actual.Leaks.Select(l => l.RuleName)), Sorted(predicted.Leaks.Select(l => l.RuleName)));
             Assert.Equal(Sorted(actual.DisabledLeaks.Select(l => l.RuleName)), Sorted(predicted.DisabledLeaks.Select(l => l.RuleName)));
+            Assert.Equal(Sorted(actual.Exceptions.Select(x => x.Entry.Name + ":" + x.Enabled)),
+                         Sorted(predicted.Exceptions.Select(x => x.Entry.Name + ":" + x.Enabled)));
             Assert.Equal(Sorted(actual.Clients.Where(c => c.Enabled).Select(c => c.Profile.Id)),
                          Sorted(predicted.Clients.Where(c => c.Enabled).Select(c => c.Profile.Id)));
             // Client executable rules depend on files on disk and are not predicted.
@@ -165,7 +168,26 @@ namespace Sveto4.Tests
             ks.SelectInterface("happ-xray");
             ks.SetLan(true);
             ks.SetWsl(true);
+            ks.AddException("SSH", "203.0.113.5", null, ExceptionProtocol.Tcp, "22");
             Check(() => ks.ResetAll(), KillSwitch.PredictReset);
+        }
+
+        [Fact]
+        public void ResetAll_WhileOff()
+        {
+            ks.SelectInterface("happ-xray");
+            Check(() => ks.ResetAll(), KillSwitch.PredictReset);
+        }
+
+        [Fact]
+        public void Exceptions_AddToggleRemove()
+        {
+            var entry = Exceptions.Create("SSH", "203.0.113.5", null, ExceptionProtocol.Tcp, "22", new string[0]);
+            Check(() => ks.AddException("SSH", "203.0.113.5", null, ExceptionProtocol.Tcp, "22"),
+                  s => KillSwitch.PredictAddException(s, entry));
+            Check(() => ks.SetExceptionEnabled(entry, false), s => KillSwitch.PredictException(s, entry, false));
+            Check(() => ks.SetExceptionEnabled(entry, true), s => KillSwitch.PredictException(s, entry, true));
+            Check(() => ks.RemoveException(entry), s => KillSwitch.PredictRemoveException(s, entry));
         }
 
         [Fact]

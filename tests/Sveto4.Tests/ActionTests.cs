@@ -187,7 +187,7 @@ namespace Sveto4.Tests
         }
 
         [Fact]
-        public void ResetAll_AllowsTrafficAndRemovesOnlyOwnRules()
+        public void ResetAll_KeepsModeAndRemovesOnlyOwnRules()
         {
             fw.Rules.Add(new RuleSpec { Name = "Core Networking - DNS (UDP-Out)" });
             var ks = Create();
@@ -197,7 +197,7 @@ namespace Sveto4.Tests
 
             ks.ResetAll();
 
-            Assert.All(fw.Blocked.Values, Assert.False);
+            Assert.All(fw.Blocked.Values, Assert.True);
             Assert.Equal(new[] { "Core Networking - DNS (UDP-Out)" }, RuleNames());
         }
 

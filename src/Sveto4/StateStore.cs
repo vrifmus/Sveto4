@@ -76,7 +76,7 @@ namespace Sveto4
 
     /// <summary>
     /// %ProgramData%\Sveto4. Writable by administrators only: settings and imported profiles decide
-    /// which programs get network access past the kill switch, so a non-elevated program must not change them.
+    /// which programs get network access past the Kill Switch, so a non-elevated program must not change them.
     /// (By default ProgramData subfolders let any user create files.)
     /// </summary>
     internal static class AppDataDir

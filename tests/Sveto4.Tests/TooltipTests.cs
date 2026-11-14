@@ -18,7 +18,7 @@ namespace Sveto4.Tests
             s.Interfaces.Add("happ-xray");
 
             Assert.Equal(
-                "Sveto4\nKill switch: ON\nLAN: ON\nWSL: OFF\nVPN clients: Happ\nBlock system leaks: ON (4)\nInterfaces: happ-xray, Wi-Fi",
+                "Sveto4\nKill Switch: ON\nLAN: ON\nWSL: OFF\nVPN clients: Happ\nBlock system leaks: ON (4)\nInterfaces: happ-xray, Wi-Fi",
                 KillSwitch.FormatTooltip(s, 127));
         }
 
@@ -27,7 +27,7 @@ namespace Sveto4.Tests
         {
             var s = new KsState { Mode = KsMode.Off };
             Assert.Equal(
-                "Sveto4\nKill switch: OFF\nLAN: OFF\nWSL: OFF\nVPN clients: none\nBlock system leaks: ON\nInterfaces: none",
+                "Sveto4\nKill Switch: OFF\nLAN: OFF\nWSL: OFF\nVPN clients: none\nBlock system leaks: ON\nInterfaces: none",
                 KillSwitch.FormatTooltip(s, 127));
         }
 
@@ -73,7 +73,7 @@ namespace Sveto4.Tests
         public void Partial()
         {
             var s = new KsState { Mode = KsMode.Partial };
-            Assert.Contains("Kill switch: PARTIAL\n", KillSwitch.FormatTooltip(s, 127));
+            Assert.Contains("Kill Switch: PARTIAL\n", KillSwitch.FormatTooltip(s, 127));
         }
 
         [Fact]
@@ -86,7 +86,7 @@ namespace Sveto4.Tests
 
             Assert.Equal(127, text.Length);
             Assert.EndsWith("…", text);
-            Assert.StartsWith("Sveto4\nKill switch: ON\n", text);
+            Assert.StartsWith("Sveto4\nKill Switch: ON\n", text);
         }
 
         [Fact]

@@ -40,7 +40,9 @@ namespace Sveto4
         private readonly MenuItem miBlockLeaks = new MenuItem("Block system leaks");
         private readonly MenuItem miClients = new MenuItem("VPN clients");
         private readonly MenuItem miInterfaces = new MenuItem("Interfaces");
+        private readonly MenuItem miExceptions = new MenuItem("Exceptions");
         private readonly MenuItem miRules = new MenuItem("Rules");
+        private readonly MenuItem miReset = new MenuItem("Reset ALL");
         private readonly MenuItem miAutostart = new MenuItem("Start with Windows");
         private readonly Autostart autostart = Autostart.CreateDefault();
         private AutostartStatus autostartStatus = AutostartStatus.Unknown;
@@ -95,6 +97,7 @@ namespace Sveto4
                     st => KillSwitch.PredictBlockLeaks(st, on, active));
             };
             miAutostart.Click += (s, e) => OnAutostartClick();
+            miReset.Click += (s, e) => Run("Reset ALL", ks.ResetAll, KillSwitch.PredictReset);
 
             menu.MenuItems.AddRange(new[]
             {
@@ -106,12 +109,12 @@ namespace Sveto4
                 miWsl,
                 miClients,
                 miInterfaces,
+                miExceptions,
                 miRules,
+                miReset,
                 new MenuItem("-"),
                 miBlockLeaks,
                 miLeaks,
-                new MenuItem("-"),
-                new MenuItem("Reset ALL", (s, e) => Run("Reset ALL", ks.ResetAll, KillSwitch.PredictReset)),
                 new MenuItem("-"),
                 miAutostart,
                 new MenuItem("-"),
@@ -159,7 +162,7 @@ namespace Sveto4
 
         private void ExitApp()
         {
-            // The firewall state is intentionally left as is: the kill switch must survive app exit.
+            // The firewall state is intentionally left as is: the Kill Switch must survive app exit.
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
             quickPollTimer.Stop();
@@ -297,7 +300,7 @@ namespace Sveto4
             }
 
             // Self-healing: Windows updates or policies may re-enable system rules (or the
-            // kill switch may be turned off outside the app). Retry at most every 5 minutes.
+            // Kill Switch may be turned off outside the app). Retry at most every 5 minutes.
             if (state.RulesLoaded && KillSwitch.NeedsLeakReconcile(state)
                 && DateTime.UtcNow - lastReconcile > TimeSpan.FromMinutes(5))
             {
@@ -452,7 +455,10 @@ namespace Sveto4
             miWsl.Text = "Allow WSL" + (state.WslAvailable || !state.RulesLoaded ? "" : "\tnot installed");
             miInterfaces.Enabled = on;
             miClients.Enabled = on;
+            miExceptions.Enabled = on;
             miRules.Enabled = on;
+            // Also available while off: removes rules left behind.
+            miReset.Enabled = state.RulesLoaded;
 
             miAutostart.Checked = autostartStatus == AutostartStatus.On;
             miAutostart.Enabled = autostartStatus != AutostartStatus.Unknown;
@@ -462,6 +468,7 @@ namespace Sveto4
 
             BuildClientsMenu();
             BuildInterfacesMenu();
+            BuildExceptionsMenu();
             BuildRulesMenu();
             BuildLeaksMenu(on);
         }
@@ -487,8 +494,8 @@ namespace Sveto4
                 miLeaks.Visible = true;
                 miLeaks.Text = $"System leaks blocked ({state.DisabledLeaks.Count})";
                 AddLeakItems(state.DisabledLeaks);
-                miLeaks.MenuItems.Add(new MenuItem("These Windows rules are disabled while the kill switch is on.") { Enabled = false });
-                miLeaks.MenuItems.Add(new MenuItem("They are restored on Turn OFF / Reset ALL.") { Enabled = false });
+                miLeaks.MenuItems.Add(new MenuItem("These Windows rules are disabled while the Kill Switch is on.") { Enabled = false });
+                miLeaks.MenuItems.Add(new MenuItem("They are restored on Turn OFF.") { Enabled = false });
             }
         }
 
@@ -625,6 +632,88 @@ namespace Sveto4
                     Enabled = client == null, // turn the profile off to remove it
                 });
             }
+        }
+
+        private void BuildExceptionsMenu()
+        {
+            miExceptions.MenuItems.Clear();
+            var enabled = state.Exceptions.Count(x => x.Enabled);
+            miExceptions.Text = enabled > 0 ? $"Exceptions ({enabled})" : "Exceptions";
+
+            foreach (var x in state.Exceptions)
+            {
+                var entry = x.Entry;
+                var missing = entry.Program != null && !ProgramExists(entry.Program);
+                var mark = missing ? Warn + " Not found" : "\t" + Shorten(Exceptions.Describe(entry), 40);
+                miExceptions.MenuItems.Add(new MenuItem(entry.Name + mark, (s, e) => OnExceptionClick(entry))
+                {
+                    Checked = x.Enabled,
+                });
+            }
+            if (state.Exceptions.Count == 0)
+                miExceptions.MenuItems.Add(new MenuItem("No exceptions") { Enabled = false });
+
+            miExceptions.MenuItems.Add(new MenuItem("-"));
+            miExceptions.MenuItems.Add(new MenuItem("Add exception…", (s, e) => OnAddException()) { Enabled = !busy });
+            if (state.Exceptions.Count > 0)
+            {
+                var remove = new MenuItem("Remove exception");
+                foreach (var x in state.Exceptions)
+                {
+                    var entry = x.Entry;
+                    remove.MenuItems.Add(new MenuItem(entry.Name, (s, e) => OnRemoveException(entry)));
+                }
+                miExceptions.MenuItems.Add(remove);
+            }
+        }
+
+        private static bool ProgramExists(string program)
+        {
+            try
+            {
+                return System.IO.File.Exists(Environment.ExpandEnvironmentVariables(program));
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private static string Shorten(string text, int max) => text.Length > max ? text.Substring(0, max - 1) + "…" : text;
+
+        private void OnExceptionClick(ExceptionEntry entry)
+        {
+            var on = !state.Exceptions.Any(x => x.Enabled && x.Entry.Name == entry.Name);
+            Run((on ? "Enable exception " : "Disable exception ") + entry.Name, () => ks.SetExceptionEnabled(entry, on),
+                st => KillSwitch.PredictException(st, entry, on));
+        }
+
+        private void OnAddException()
+        {
+            if (busy) return;
+            ExceptionEntry entry;
+            using (var owner = DialogOwner())
+            using (var dialog = new ExceptionDialog(state.Exceptions.Select(x => x.Entry.Name).ToList()))
+            {
+                if (dialog.ShowDialog(owner) != DialogResult.OK) return;
+                entry = dialog.Result;
+            }
+            Run("Add exception " + entry.Name,
+                () => ks.AddException(entry.Name, entry.Addresses, entry.Program, entry.Protocol, entry.Ports),
+                st => KillSwitch.PredictAddException(st, entry));
+        }
+
+        private void OnRemoveException(ExceptionEntry entry)
+        {
+            if (busy) return;
+            using (var owner = DialogOwner())
+            {
+                if (MessageBox.Show(owner, $"Remove exception \"{entry.Name}\"?\nIts firewall rule is removed too.",
+                        "Sveto4", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                    return;
+            }
+            Run("Remove exception " + entry.Name, () => ks.RemoveException(entry),
+                st => KillSwitch.PredictRemoveException(st, entry));
         }
 
         private void BuildRulesMenu()

@@ -12,7 +12,7 @@
     <Product>Sveto4</Product>
     <Copyright>Copyright (c) 2026 vrifmus</Copyright>
     <Authors>vrifmus</Authors>
-    <Description>VPN kill switch based on Windows Firewall</Description>
+    <Description>VPN Kill Switch based on Windows Firewall</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>

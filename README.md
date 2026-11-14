@@ -4,7 +4,7 @@
 
 ![Sveto4 tray menu and tooltip](docs/screenshot.png)
 
-A VPN kill switch for Windows that lives in the system tray. It blocks all outbound traffic with Windows Firewall, except through the network interfaces you allow. It is meant for VPN clients that have no kill switch of their own, or one that is hard to set up. Tested with **Happ** (built-in profile), **NekoBox**, **INCY** and **AmneziaVPN** (sample profiles).
+A VPN Kill Switch for Windows that lives in the system tray. It blocks all outbound traffic with Windows Firewall, except through the network interfaces you allow. It is meant for VPN clients that have no Kill Switch of their own, or one that is hard to set up. Tested with **Happ** (built-in profile), **NekoBox**, **INCY** and **AmneziaVPN** (sample profiles).
 
 Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to install. The original PowerShell version is kept in `legacy/`.
 
@@ -14,6 +14,7 @@ Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to
 - **VPN client profiles.** Happ is built in, others are imported as JSON. A profile allows the client's executables, so core switches (xray ↔ sing-box) and cores started later just work.
 - **Automatic tunnel adapters.** A new TUN adapter, even with a random name like `tun_<random>`, is allowed as soon as it appears; a vanished one is removed.
 - **System leak blocking.** Built-in Windows rules that can leak traffic (DNS, IPv6, Teredo, IP-HTTPS) are disabled while blocking and restored afterwards. Optional.
+- **Exceptions.** Allow specific addresses past the Kill Switch, optionally for one program and port, e.g. SSH to the VPN server itself.
 - **LAN and WSL toggles.** Allow LAN (including `fe80::/10`) and Allow WSL (via a Hyper-V firewall rule, not by allowing all system traffic).
 - **Small and native.** One small exe on .NET Framework 4.8, built into Windows 10/11. Tray menu follows the light/dark theme; firewall profiles that disagree are shown as "partially on".
 
@@ -22,7 +23,7 @@ Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to
 Download `sveto4.exe` from [Releases](../../releases) and put it in a folder only administrators can write to, for example `C:\Program Files\Sveto4\` (see [Security and limitations](#security-and-limitations)). The app asks for administrator rights.
 
 - Only one copy runs at a time.
-- `--auto-enable` turns the kill switch on at startup. "Start with Windows" does not use it.
+- `--auto-enable` turns the Kill Switch on at startup. "Start with Windows" does not use it.
 
 ### Build from source
 
@@ -48,11 +49,12 @@ dotnet test        # unit tests, they never touch the real firewall
 - **Allow WSL**: lets WSL out through the Hyper-V firewall (rule `KS-WSL-Allow`, Windows 11 22H2+). WSL traffic then follows the same rules as Windows: it goes out only through the allowed interfaces (the VPN) and is blocked when the VPN is down.
 - **VPN clients**: client profiles (see below). An enabled profile allows the client's executables and selects its tunnel adapters automatically, including adapters with random names that change on every connection.
 - **Interfaces**: adapters that traffic may use (rule `KS-Allow-<name>`). Adapters managed by a profile are checked and greyed out, with the client name on the right. A selected adapter that is missing or disconnected is marked `⚠ Not found` / `⚠ Disconnected`; click it to deselect. **None** clears all interfaces and disables profiles.
+- **Exceptions**: addresses allowed past the Kill Switch (see [Exceptions](#exceptions)).
 - **Rules**: the app's firewall rules (prefix `KS-`), read-only.
-- **Block system leaks**: while the kill switch is on, disables built-in Windows rules that let traffic bypass it (see [System leaks](#system-leaks)).
-- **Reset ALL**: allows traffic and removes all `KS-*` rules. Does not touch autostart.
+- **Reset ALL**: removes all `KS-*` rules (interfaces, profiles, LAN, WSL, exceptions) and disables profiles and exceptions; their definitions are kept. The Kill Switch stays as it is: if it is on, all traffic stays blocked. System leak blocking and autostart are not touched.
+- **Block system leaks**: while the Kill Switch is on, disables built-in Windows rules that let traffic bypass it (see [System leaks](#system-leaks)).
 - **Start with Windows**: a Task Scheduler task that starts the app at logon with highest privileges (no UAC prompt). If the exe is moved, the task follows it on the next start.
-- **Exit**: the kill switch **stays on** after exit or a crash. That is the point of a kill switch.
+- **Exit**: the Kill Switch **stays on** after exit or a crash. That is the point of a Kill Switch.
 
 ## VPN client profiles
 
@@ -84,11 +86,27 @@ dotnet test        # unit tests, they never touch the real firewall
 
 Profiles are stored in `%ProgramData%\Sveto4\profiles\`; the app makes `%ProgramData%\Sveto4` writable by administrators only. A drive root, `Windows`, `Program Files`, `ProgramData` or a user profile root is never accepted as a client folder.
 
+## Exceptions
+
+An exception allows traffic to specific addresses past the Kill Switch, through any adapter. The typical case is the VPN server itself: the VPN client reaches it outside the tunnel, so with the Kill Switch on, `ssh` to the server fails with `Permission denied` even while the VPN is connected.
+
+**Exceptions → Add exception…** opens a window:
+
+| Field | Required | Meaning |
+|---|---|---|
+| Name | yes | Shown in the menu; rule `KS-Exc-<name>` |
+| Address | yes | IP addresses or subnets, comma-separated (`203.0.113.5`, `198.51.100.0/24`, IPv6). Host names are not supported. Subnets broader than `/8` (IPv4) or `/16` (IPv6) are refused |
+| Program | no | Full path to an exe, e.g. `C:\Windows\System32\OpenSSH\ssh.exe`. Empty: any program |
+| Protocol | no | Any, TCP or UDP |
+| Ports | no | Remote ports with TCP/UDP: `22`, `80,443`, `8000-8100`. Empty: any port |
+
+A new exception is enabled right away. Click it to turn it off or on; **Remove exception ▸** deletes it. A program that no longer exists is marked `⚠ Not found`. Exceptions are stored in `%ProgramData%\Sveto4\exceptions.json` (administrators only).
+
 ## Tooltip
 
 ```
 🟢 Sveto4
-Kill switch: ON
+Kill Switch: ON
 LAN: OFF
 WSL: OFF
 VPN clients: Happ
@@ -111,13 +129,14 @@ The circle repeats the icon color:
 
 Built-in Windows Allow rules still work while outbound traffic is blocked. The app tracks four of them, recognized by their properties (so the Windows language does not matter): **DNS**, **IPv6 tunnel**, **Teredo** and **IP-HTTPS**.
 
-- With **Block system leaks** on (default), they are disabled while the kill switch is on, remembered in `%ProgramData%\Sveto4\disabled-rules.txt` and re-enabled on Turn OFF / Reset ALL. Rules you disabled yourself are left alone. If Windows re-enables a rule, the app disables it again (at most every 5 minutes).
+- With **Block system leaks** on (default), they are disabled while the Kill Switch is on, remembered in `%ProgramData%\Sveto4\disabled-rules.txt` and re-enabled on Turn OFF. Rules you disabled yourself are left alone. If Windows re-enables a rule, the app disables it again (at most every 5 minutes).
 - With it off, the menu only warns: **Possible leaks (N)**.
 - Side effect: if a VPN client resolves its server through Windows DNS, it cannot reconnect while the VPN is down. Turn the option off in that case.
 
 ## Security and limitations
 
-- **The kill switch is built on Windows Firewall rules**, not on its own WFP filters. A program with administrator rights can add WFP filters and bypass it. sing-box based cores (NekoBox, INCY) do exactly that to reach their server. That is fine for a VPN client, but it also means the kill switch does not stop malware running as administrator.
+- **The Kill Switch is built on Windows Firewall rules**, not on its own WFP filters. A program with administrator rights can add WFP filters and bypass it. sing-box based cores (NekoBox, INCY) do exactly that to reach their server. That is fine for a VPN client, but it also means the Kill Switch does not stop malware running as administrator.
+- **An exception opens addresses past the VPN.** Traffic to them goes outside the tunnel and reveals your real IP to that host. Limit it to a program and port where you can.
 - **A client profile grants network access to programs.** Import only profiles you understand. For clients in user-writable folders (`%APPDATA%`), use `allowExe`.
 - **Autostart runs the exe with administrator rights and no UAC prompt.** Keep the app in a folder only administrators can write to, such as `C:\Program Files\Sveto4\`. Otherwise any program could replace `sveto4.exe` and gain administrator rights at the next logon.
 - **The exe is not code-signed**, so SmartScreen may warn on first run. Release builds are produced by GitHub Actions from this repository's source.

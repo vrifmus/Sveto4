@@ -43,7 +43,7 @@ namespace Sveto4.Tests
             return Rules.Select(r => new RuleProps
                         {
                             Name = r.Name, Enabled = r.Enabled, IsOutboundAllow = true,
-                            ApplicationName = r.ApplicationName, Protocol = 256,
+                            ApplicationName = r.ApplicationName, Protocol = r.Protocol, RemotePorts = r.RemotePorts,
                         })
                         .Concat(SystemRules.Select(Copy))
                         .ToList();
@@ -80,6 +80,13 @@ namespace Sveto4.Tests
             Name = r.Name, Enabled = r.Enabled, IsOutboundAllow = true, ApplicationName = r.ApplicationName,
             ServiceName = r.ServiceName, Protocol = r.Protocol, RemotePorts = r.RemotePorts,
         };
+    }
+
+    internal sealed class FakeExceptionStore : IExceptionStore
+    {
+        public List<ExceptionEntry> Entries = new List<ExceptionEntry>();
+        public List<ExceptionEntry> Load() => Entries.ToList();
+        public void Save(List<ExceptionEntry> entries) => Entries = entries.ToList();
     }
 
     internal sealed class FakeStore : IStateStore

@@ -52,14 +52,14 @@ namespace Sveto4.Tests
         }
 
         [Fact]
-        public void ResetAll_Restores()
+        public void ResetAll_KeepsLeaksBlocked()
         {
             var ks = Create();
             ks.SetMode(true);
             ks.ResetAll();
 
-            Assert.True(dns.Enabled);
-            Assert.Empty(store.Disabled);
+            Assert.False(dns.Enabled);
+            Assert.Equal(2, store.Disabled.Count);
         }
 
         [Fact]

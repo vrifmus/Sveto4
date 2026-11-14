@@ -92,7 +92,7 @@ namespace Sveto4
             var doc = new XDocument(
                 new XElement(ns + "Task", new XAttribute("version", "1.2"),
                     new XElement(ns + "RegistrationInfo",
-                        new XElement(ns + "Description", "Sveto4 VPN kill switch (tray)")),
+                        new XElement(ns + "Description", "Sveto4 VPN Kill Switch (tray)")),
                     new XElement(ns + "Triggers",
                         new XElement(ns + "LogonTrigger",
                             new XElement(ns + "Enabled", "true"),

@@ -28,6 +28,10 @@ namespace Sveto4
         public string ApplicationName;
         /// <summary>Address or subnet, e.g. "10.0.0.0/255.0.0.0".</summary>
         public string RemoteAddresses;
+        /// <summary>IANA protocol number: 6 = TCP, 17 = UDP, 256 = any.</summary>
+        public int Protocol = 256;
+        /// <summary>Remote ports, e.g. "22" or "8000-8100" (only with TCP/UDP).</summary>
+        public string RemotePorts;
     }
 
     /// <summary>Properties of an existing rule, used to recognize system rules regardless of UI language.</summary>
@@ -44,7 +48,7 @@ namespace Sveto4
         public string RemotePorts;
     }
 
-    /// <summary>Windows Firewall operations used by the kill switch. Replaced by a fake in tests.</summary>
+    /// <summary>Windows Firewall operations used by the Kill Switch. Replaced by a fake in tests.</summary>
     internal interface IFirewall
     {
         bool IsFirewallEnabled(int profile);
@@ -167,6 +171,9 @@ namespace Sveto4
             if (spec.Interface != null) rule.Interfaces = new object[] { spec.Interface };
             if (spec.ApplicationName != null) rule.ApplicationName = spec.ApplicationName;
             if (spec.RemoteAddresses != null) rule.RemoteAddresses = spec.RemoteAddresses;
+            // Ports can only be set after a protocol that has ports.
+            if (spec.Protocol != 256) rule.Protocol = spec.Protocol;
+            if (spec.RemotePorts != null) rule.RemotePorts = spec.RemotePorts;
             rule.Enabled = spec.Enabled;
 
             dynamic policy = NewPolicy();
