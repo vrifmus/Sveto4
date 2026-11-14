@@ -23,7 +23,7 @@ namespace Sveto4.Tests
             Func<IEnumerable<ProcessEntry>> processes = null,
             IEnumerable<string> files = null,
             List<AdapterInfo> adapters = null,
-            IEnumerable<string> userWritableDirs = null)
+            IEnumerable<string> userWritableDirs = null) // folders or files writable without admin rights
         {
             var fileList = (files ?? new string[0]).ToList();
             var adapterList = adapters ?? new List<AdapterInfo>();
@@ -35,6 +35,7 @@ namespace Sveto4.Tests
                 ListExe = dir => fileList.Where(f => f.StartsWith(dir + @"\", StringComparison.OrdinalIgnoreCase)),
                 Adapters = () => adapterList.ToList(),
                 IsAdminOnlyFolder = dir => !writable.Contains(dir),
+                IsAdminOnlyItem = path => !writable.Contains(path),
             };
         }
 

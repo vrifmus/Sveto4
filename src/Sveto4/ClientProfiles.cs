@@ -87,6 +87,8 @@ namespace Sveto4
         public Func<List<AdapterInfo>> Adapters;
         /// <summary>The folder and the folders above it can be changed by administrators only.</summary>
         public Func<string, bool> IsAdminOnlyFolder;
+        /// <summary>The file or folder itself can be changed by administrators only; false if unreadable.</summary>
+        public Func<string, bool> IsAdminOnlyItem;
     }
 
     /// <summary>Adapter changes needed to keep a client's tunnel adapters allowed.</summary>
@@ -198,12 +200,46 @@ namespace Sveto4
             (string.Equals(path, root, StringComparison.OrdinalIgnoreCase)
              || path.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase));
 
-        /// <summary>Executables to allow: everything in the install folder except excluded ones.</summary>
-        public static List<string> ExecutablesToAllow(ClientProfile profile, string installDir, ClientEnvironment env) =>
-            installDir == null
-                ? new List<string>()
-                : env.ListExe(installDir).Where(p => !profile.IsExcluded(p))
-                     .OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+        /// <summary>
+        /// Executables to allow: everything in the install folder except excluded ones. In an administrators-only
+        /// folder, an exe that itself, or a subfolder on the way to it, can be changed without administrator rights
+        /// is skipped: otherwise any program could replace it and get network access.
+        /// </summary>
+        public static List<string> ExecutablesToAllow(ClientProfile profile, string installDir, ClientEnvironment env)
+        {
+            if (installDir == null) return new List<string>();
+            var candidates = env.ListExe(installDir).Where(p => !profile.IsExcluded(p))
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+            // A user-writable folder is accepted only with "allowExe"; its files are writable anyway.
+            if (!env.IsAdminOnlyFolder(installDir)) return candidates;
+
+            var checkedItems = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            Func<string, bool> isAdminOnly = path =>
+                checkedItems.TryGetValue(path, out var ok) ? ok : checkedItems[path] = env.IsAdminOnlyItem(path);
+
+            var result = new List<string>();
+            foreach (var exe in candidates)
+            {
+                var writable = WritableOnTheWay(installDir, exe, isAdminOnly);
+                if (writable == null) result.Add(exe);
+                else LogOnce($"{profile.Name}: not allowed, {writable} can be changed without administrator rights: {exe}");
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// "the file" or "folder X" when the exe or a folder between it and <paramref name="installDir"/>
+        /// (the install folder itself is checked separately) is not administrators-only; null otherwise.
+        /// </summary>
+        public static string WritableOnTheWay(string installDir, string exe, Func<string, bool> isAdminOnlyItem)
+        {
+            if (!isAdminOnlyItem(exe)) return "the file";
+            for (var dir = Path.GetDirectoryName(exe);
+                 dir != null && dir.Length > installDir.Length && Under(dir, installDir);
+                 dir = Path.GetDirectoryName(dir))
+                if (!isAdminOnlyItem(dir)) return "folder " + dir;
+            return null;
+        }
 
         /// <summary>
         /// Every present adapter of the client must be selected; selected client adapters that
@@ -238,6 +274,18 @@ namespace Sveto4
             ListExe = dir => Directory.EnumerateFiles(dir, "*.exe", SearchOption.AllDirectories),
             Adapters = SystemAdapters,
             IsAdminOnlyFolder = FolderSecurity.IsAdminOnlyFolder,
+            IsAdminOnlyItem = path =>
+            {
+                try
+                {
+                    return FolderSecurity.IsAdminOnlyItem(path);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "read permissions of " + path);
+                    return false;
+                }
+            },
         };
 
         private static List<AdapterInfo> SystemAdapters() =>

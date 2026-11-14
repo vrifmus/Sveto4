@@ -86,7 +86,7 @@ dotnet test        # unit tests, they never touch the real firewall
 
 Profiles are stored in `%ProgramData%\Sveto4\profiles\`; the app makes `%ProgramData%\Sveto4` writable by administrators only. A drive root, `Windows`, `Program Files`, `ProgramData` or a user profile root is never accepted as a client folder.
 
-How the client folder is found: first the profile's `defaultInstallDirs`, then the folder of a running `mainProcesses` exe. A folder that programs without administrator rights can change (checked for the folder and every folder above it) is accepted only from `defaultInstallDirs` and only if the profile has `allowExe`. A folder found by a running process must be administrators-only: otherwise any program could name itself like the client and get network access.
+How the client folder is found: first the profile's `defaultInstallDirs`, then the folder of a running `mainProcesses` exe. A folder that programs without administrator rights can change (checked for the folder and every folder above it) is accepted only from `defaultInstallDirs` and only if the profile has `allowExe`. A folder found by a running process must be administrators-only: otherwise any program could name itself like the client and get network access. In an administrators-only folder, an exe that can itself be changed without administrator rights, or lies in such a subfolder, is not allowed (logged as `not allowed, … can be changed without administrator rights`).
 
 ## Exceptions
 

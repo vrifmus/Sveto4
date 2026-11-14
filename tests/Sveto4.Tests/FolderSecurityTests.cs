@@ -114,6 +114,45 @@ namespace Sveto4.Tests
             Assert.Equal(FakeDir, ClientProfiles.ResolveInstallDir(withAllow, env));
         }
 
+        // ---------- Executables inside the install folder ----------
+
+        private const string Dir = TestEnv.HappDir;
+
+        [Fact]
+        public void AdminOnlyFolder_WritableExe_IsSkipped()
+        {
+            var env = TestEnv.Create(files: TestEnv.HappFiles, userWritableDirs: new[] { Dir + @"\core\xray.exe" });
+            var allowed = ClientProfiles.ExecutablesToAllow(Happ, Dir, env);
+            Assert.DoesNotContain(Dir + @"\core\xray.exe", allowed);
+            Assert.Contains(Dir + @"\Happ.exe", allowed);
+        }
+
+        [Fact]
+        public void AdminOnlyFolder_WritableSubfolder_SkipsItsExe()
+        {
+            var env = TestEnv.Create(files: TestEnv.HappFiles, userWritableDirs: new[] { Dir + @"\tun" });
+            var allowed = ClientProfiles.ExecutablesToAllow(Happ, Dir, env);
+            Assert.DoesNotContain(Dir + @"\tun\sing-box.exe", allowed);
+            Assert.Contains(Dir + @"\core\xray.exe", allowed);
+        }
+
+        [Fact]
+        public void UserWritableFolder_FilesAreNotChecked()
+        {
+            var profile = new ClientProfile { Id = "y", Name = "Y", AllowExe = new[] { "y.exe" } };
+            var env = TestEnv.Create(files: new[] { FakeDir + @"\y.exe" }, userWritableDirs: new[] { FakeDir, FakeDir + @"\y.exe" });
+            Assert.Equal(new[] { FakeDir + @"\y.exe" }, ClientProfiles.ExecutablesToAllow(profile, FakeDir, env));
+        }
+
+        [Fact]
+        public void WritableOnTheWay_ChecksOnlyBelowInstallFolder()
+        {
+            var seen = new System.Collections.Generic.List<string>();
+            Assert.Null(ClientProfiles.WritableOnTheWay(@"C:\A", @"C:\A\b\c\x.exe", p => { seen.Add(p); return true; }));
+            Assert.Equal(new[] { @"C:\A\b\c\x.exe", @"C:\A\b\c", @"C:\A\b" }, seen.ToArray());
+            Assert.Equal(@"folder C:\A\b", ClientProfiles.WritableOnTheWay(@"C:\A", @"C:\A\b\c\x.exe", p => p != @"C:\A\b"));
+        }
+
         [Fact]
         public void UserWritableProcessFolder_RejectedEvenWithAllowExe() =>
             Assert.NotNull(ClientProfiles.RejectInstallDir(
