@@ -57,6 +57,9 @@ namespace Sveto4
 
         // ---------- Pure logic ----------
 
+        /// <summary>SYSTEM, Administrators or TrustedInstaller.</summary>
+        public static bool IsTrustedSid(string sid) => sid != null && TrustedSids.Contains(sid);
+
         /// <summary>
         /// True when the owner is trusted and no other principal is granted any of <paramref name="forbidden"/>.
         /// An untrusted owner can always rewrite the permissions.

@@ -11,10 +11,9 @@ namespace Sveto4
         [STAThread]
         private static void Main(string[] args)
         {
-            using (var mutex = new Mutex(true, @"Global\Sveto4.SingleInstance", out var isFirst))
+            if (!SingleInstance.TryAcquire(out var mutex, out var mutexWarning)) return;
+            using (mutex)
             {
-                if (!isFirst) return;
-
                 // Never show error dialogs: log instead.
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
                 Application.ThreadException += (s, e) => Log.Error(e.Exception, "UI thread");
@@ -33,6 +32,7 @@ namespace Sveto4
 
                 AppDataDir.Ensure(); // the log is written only into the secured folder
                 Log.Info("Started" + (autoEnable ? " (auto-enable)" : ""));
+                if (mutexWarning != null) Log.Info(mutexWarning);
                 Application.Run(new TrayApp(autoEnable));
                 Log.Info("Exited");
                 GC.KeepAlive(mutex);

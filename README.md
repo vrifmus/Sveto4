@@ -22,7 +22,7 @@ Written in C# for .NET Framework 4.8, which ships with Windows 10/11: nothing to
 
 Download `sveto4.exe` from [Releases](../../releases) and put it in a folder only administrators can write to, for example `C:\Program Files\Sveto4\` (see [Security and limitations](#security-and-limitations)). The app asks for administrator rights.
 
-- Only one copy runs at a time.
+- Only one copy runs at a time. A copy is recognised by a mutex owned by administrators: if a program without administrator rights creates a mutex with the same name, Sveto4 still starts and writes a warning to the log.
 - `--auto-enable` turns the Kill Switch on at startup. "Start with Windows" does not use it.
 
 ### Build from source
