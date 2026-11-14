@@ -86,6 +86,8 @@ dotnet test        # unit tests, they never touch the real firewall
 
 Profiles are stored in `%ProgramData%\Sveto4\profiles\`; the app makes `%ProgramData%\Sveto4` writable by administrators only. A drive root, `Windows`, `Program Files`, `ProgramData` or a user profile root is never accepted as a client folder.
 
+How the client folder is found: first the profile's `defaultInstallDirs`, then the folder of a running `mainProcesses` exe. A folder that programs without administrator rights can change (checked for the folder and every folder above it) is accepted only from `defaultInstallDirs` and only if the profile has `allowExe`. A folder found by a running process must be administrators-only: otherwise any program could name itself like the client and get network access.
+
 ## Exceptions
 
 An exception allows traffic to specific addresses past the Kill Switch, through any adapter. The typical case is the VPN server itself: the VPN client reaches it outside the tunnel, so with the Kill Switch on, `ssh` to the server fails with `Permission denied` even while the VPN is connected.
@@ -138,6 +140,7 @@ Built-in Windows Allow rules still work while outbound traffic is blocked. The a
 - **The Kill Switch is built on Windows Firewall rules**, not on its own WFP filters. A program with administrator rights can add WFP filters and bypass it. sing-box based cores (NekoBox, INCY) do exactly that to reach their server. That is fine for a VPN client, but it also means the Kill Switch does not stop malware running as administrator.
 - **An exception opens addresses past the VPN.** Traffic to them goes outside the tunnel and reveals your real IP to that host. Limit it to a program and port where you can.
 - **A client profile grants network access to programs.** Import only profiles you understand. For clients in user-writable folders (`%APPDATA%`), use `allowExe`.
+- **Add profiles only with Import profile…, do not copy or move files into `%ProgramData%\Sveto4` by hand.** A file moved into a folder keeps the permissions of its old location, for example full access for your account on the Desktop. Until the permissions are fixed, any program running as you, without administrator rights, can rewrite it: add an exe to a profile or change the settings. Import reads the file and writes a new one with the folder's permissions. The app also checks every file before reading it and resets loose permissions (logged as `Permissions reset`), but it cannot tell whether the file was changed before that.
 - **Autostart runs the exe with administrator rights and no UAC prompt.** Keep the app in a folder only administrators can write to, such as `C:\Program Files\Sveto4\`. Otherwise any program could replace `sveto4.exe` and gain administrator rights at the next logon.
 - **The exe is not code-signed**, so SmartScreen may warn on first run. Release builds are produced by GitHub Actions from this repository's source.
 - Only the four system rules above are handled. Other built-in Allow rules (Store, Remote Assistance, etc.) stay active.
@@ -145,7 +148,7 @@ Built-in Windows Allow rules still work while outbound traffic is blocked. The a
 
 ## Errors and log
 
-The menu shows the expected result right after a click, then re-reads the real state from the firewall; if the operation failed, it shows the actual state. No error dialogs are shown: errors go to `%LOCALAPPDATA%\Sveto4\sveto4.log`, together with operation timings and adapters that appear after startup.
+The menu shows the expected result right after a click, then re-reads the real state from the firewall; if the operation failed, it shows the actual state. No error dialogs are shown: errors go to `%ProgramData%\Sveto4\sveto4.log` (administrators-only folder, readable by everyone), together with operation timings and adapters that appear after startup.
 
 The menu follows the Windows light/dark app mode (Windows 10 1903+).
 

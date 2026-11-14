@@ -31,6 +31,7 @@ namespace Sveto4
                     a.Equals("--auto-enable", StringComparison.OrdinalIgnoreCase) ||
                     a.Equals("-AutoEnable", StringComparison.OrdinalIgnoreCase));
 
+                AppDataDir.Ensure(); // the log is written only into the secured folder
                 Log.Info("Started" + (autoEnable ? " (auto-enable)" : ""));
                 Application.Run(new TrayApp(autoEnable));
                 Log.Info("Exited");

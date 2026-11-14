@@ -5,15 +5,16 @@ namespace Sveto4
 {
     /// <summary>
     /// Minimal file logger. Errors go here instead of message boxes.
-    /// Location: %LOCALAPPDATA%\Sveto4\sveto4.log (rotated at 1 MB).
+    /// Location: %ProgramData%\Sveto4\sveto4.log (rotated at 1 MB). The app runs elevated, so the log lives in
+    /// the administrators-only folder: in a user folder a non-elevated program could redirect the rotation
+    /// (delete and move) to another file through a link.
     /// </summary>
     internal static class Log
     {
         private const long MaxSize = 1024 * 1024;
         private static readonly object Sync = new object();
 
-        public static readonly string FilePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sveto4", "sveto4.log");
+        public static readonly string FilePath = Path.Combine(AppDataDir.Path, "sveto4.log");
 
         /// <summary>Only the app itself writes the log: unit tests (another entry assembly) must not pollute it.</summary>
         private static readonly bool Enabled = string.Equals(
@@ -26,12 +27,12 @@ namespace Sveto4
 
         private static void Write(string level, string message)
         {
-            if (!Enabled) return;
+            // Nothing is written until the folder is secured (AppDataDir.Ensure at startup).
+            if (!Enabled || !AppDataDir.Secured) return;
             try
             {
                 lock (Sync)
                 {
-                    Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
                     var file = new FileInfo(FilePath);
                     if (file.Exists && file.Length > MaxSize)
                     {

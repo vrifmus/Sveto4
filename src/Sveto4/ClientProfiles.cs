@@ -85,6 +85,8 @@ namespace Sveto4
         public Func<string, IEnumerable<string>> ListExe;
         /// <summary>Network adapters (excluding loopback).</summary>
         public Func<List<AdapterInfo>> Adapters;
+        /// <summary>The folder and the folders above it can be changed by administrators only.</summary>
+        public Func<string, bool> IsAdminOnlyFolder;
     }
 
     /// <summary>Adapter changes needed to keep a client's tunnel adapters allowed.</summary>
@@ -112,22 +114,47 @@ namespace Sveto4
         public static readonly IReadOnlyList<ClientProfile> BuiltIn = new[] { Happ };
 
         /// <summary>
-        /// Folder of a running main process, otherwise the first existing default folder, otherwise null.
-        /// Shared system folders are never accepted (see <see cref="IsUnsafeInstallDir"/>).
+        /// First acceptable folder among the profile's default folders, then folders of running main processes;
+        /// null if none. Shared system folders are never accepted (see <see cref="IsUnsafeInstallDir"/>).
+        /// A folder that non-administrators can change is accepted only from the profile's own list and only
+        /// with "allowExe": otherwise any program named like the client could get network access.
         /// </summary>
         public static string ResolveInstallDir(ClientProfile profile, ClientEnvironment env)
         {
-            var candidates = env.Processes()
+            var defaults = profile.DefaultInstallDirs.Select(Environment.ExpandEnvironmentVariables)
+                .Where(env.DirectoryExists)
+                .Select(dir => (Dir: dir, FromProcess: false));
+            var running = env.Processes()
                 .Where(p => !string.IsNullOrEmpty(p.ExePath)
                             && profile.MainProcesses.Any(m => string.Equals(m, p.Name, StringComparison.OrdinalIgnoreCase)))
-                .Select(p => Path.GetDirectoryName(p.ExePath))
-                .Concat(profile.DefaultInstallDirs.Select(Environment.ExpandEnvironmentVariables).Where(env.DirectoryExists));
+                .Select(p => (Dir: Path.GetDirectoryName(p.ExePath), FromProcess: true));
 
-            foreach (var dir in candidates)
+            foreach (var c in defaults.Concat(running))
             {
-                if (!IsUnsafeInstallDir(dir)) return dir;
-                Log.Info($"{profile.Name}: install folder rejected (shared system folder): {dir}");
+                var reason = RejectInstallDir(profile, c.Dir, c.FromProcess, env.IsAdminOnlyFolder);
+                if (reason == null) return c.Dir;
+                LogOnce($"{profile.Name}: install folder rejected ({reason}): {c.Dir}");
             }
+            return null;
+        }
+
+        private static readonly HashSet<string> Logged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>The folder is resolved on every full read (~30 s): log each rejection once.</summary>
+        private static void LogOnce(string message)
+        {
+            lock (Logged)
+                if (!Logged.Add(message)) return;
+            Log.Info(message);
+        }
+
+        /// <summary>Why the folder cannot be the client's install folder, or null if it can.</summary>
+        public static string RejectInstallDir(ClientProfile profile, string dir, bool fromProcess, Func<string, bool> isAdminOnly)
+        {
+            if (IsUnsafeInstallDir(dir)) return "shared system folder";
+            if (isAdminOnly(dir)) return null;
+            if (fromProcess) return "found by a running process, but writable without administrator rights";
+            if (profile.AllowExe.Length == 0) return "writable without administrator rights; the profile needs \"allowExe\"";
             return null;
         }
 
@@ -210,6 +237,7 @@ namespace Sveto4
             DirectoryExists = Directory.Exists,
             ListExe = dir => Directory.EnumerateFiles(dir, "*.exe", SearchOption.AllDirectories),
             Adapters = SystemAdapters,
+            IsAdminOnlyFolder = FolderSecurity.IsAdminOnlyFolder,
         };
 
         private static List<AdapterInfo> SystemAdapters() =>

@@ -22,16 +22,19 @@ namespace Sveto4.Tests
         public static ClientEnvironment Create(
             Func<IEnumerable<ProcessEntry>> processes = null,
             IEnumerable<string> files = null,
-            List<AdapterInfo> adapters = null)
+            List<AdapterInfo> adapters = null,
+            IEnumerable<string> userWritableDirs = null)
         {
             var fileList = (files ?? new string[0]).ToList();
             var adapterList = adapters ?? new List<AdapterInfo>();
+            var writable = new HashSet<string>(userWritableDirs ?? new string[0], StringComparer.OrdinalIgnoreCase);
             return new ClientEnvironment
             {
                 Processes = processes ?? (() => new ProcessEntry[0]),
                 DirectoryExists = dir => fileList.Any(f => f.StartsWith(dir + @"\", StringComparison.OrdinalIgnoreCase)),
                 ListExe = dir => fileList.Where(f => f.StartsWith(dir + @"\", StringComparison.OrdinalIgnoreCase)),
                 Adapters = () => adapterList.ToList(),
+                IsAdminOnlyFolder = dir => !writable.Contains(dir),
             };
         }
 

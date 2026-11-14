@@ -318,13 +318,13 @@ namespace Sveto4
         public List<ExceptionEntry> Load()
         {
             if (!File.Exists(FilePath)) return new List<ExceptionEntry>();
-            AppDataDir.Ensure(); // re-apply permissions before trusting the file
+            AppDataDir.Trust(FilePath);
             return Exceptions.Parse(File.ReadAllText(FilePath), message => Log.Info("Exception skipped: " + message));
         }
 
         public void Save(List<ExceptionEntry> entries)
         {
-            AppDataDir.Ensure();
+            AppDataDir.Trust(FilePath);
             File.WriteAllText(FilePath, Exceptions.Serialize(entries));
         }
     }
