@@ -223,6 +223,69 @@ namespace Sveto4.Tests
         }
 
         [Fact]
+        public void Edit_ReplacesDefinitionAndRule_KeepsOrder()
+        {
+            var ks = Create();
+            var e = ks.AddException("SSH", "203.0.113.5", null, ExceptionProtocol.Any, null);
+            ks.AddException("Other", "203.0.113.6", null, ExceptionProtocol.Any, null);
+            ks.EditException(e, "VPS", "203.0.113.7", null, ExceptionProtocol.Tcp, "2222", true);
+
+            Assert.Equal(new[] { "VPS", "Other" }, store.Entries.Select(x => x.Name).ToArray());
+            Assert.Null(fw.Find("KS-Exc-SSH"));
+            var rule = fw.Find("KS-Exc-VPS");
+            Assert.True(rule.Enabled);
+            Assert.Equal("203.0.113.7", rule.RemoteAddresses);
+            Assert.Equal("2222", rule.RemotePorts);
+        }
+
+        [Fact]
+        public void Edit_Disabled_StaysDisabled()
+        {
+            var ks = Create();
+            var e = ks.AddException("SSH", "203.0.113.5", null, ExceptionProtocol.Any, null);
+            ks.SetExceptionEnabled(e, false);
+            ks.EditException(e, "SSH", "203.0.113.7", null, ExceptionProtocol.Any, null, false);
+
+            Assert.Empty(fw.Rules);
+            Assert.Equal("203.0.113.7", Assert.Single(store.Entries).Addresses);
+        }
+
+        [Fact]
+        public void Edit_SameNameDifferentCase_IsAllowed()
+        {
+            var ks = Create();
+            var e = ks.AddException("SSH", "203.0.113.5", null, ExceptionProtocol.Any, null);
+            ks.EditException(e, "ssh", "203.0.113.5", null, ExceptionProtocol.Any, null, true);
+
+            Assert.Equal("ssh", Assert.Single(store.Entries).Name);
+            Assert.Equal("KS-Exc-ssh", Assert.Single(fw.Rules).Name);
+        }
+
+        [Fact]
+        public void Edit_ToExistingName_Throws_AndChangesNothing()
+        {
+            var ks = Create();
+            var e = ks.AddException("SSH", "203.0.113.5", null, ExceptionProtocol.Any, null);
+            ks.AddException("Other", "203.0.113.6", null, ExceptionProtocol.Any, null);
+
+            Assert.Throws<ExceptionValidationError>(() =>
+                ks.EditException(e, "other", "203.0.113.7", null, ExceptionProtocol.Any, null, true));
+            Assert.Equal(new[] { "SSH", "Other" }, store.Entries.Select(x => x.Name).ToArray());
+            Assert.NotNull(fw.Find("KS-Exc-SSH"));
+        }
+
+        [Fact]
+        public void Edit_InvalidInput_KeepsOldRule()
+        {
+            var ks = Create();
+            var e = ks.AddException("SSH", "203.0.113.5", null, ExceptionProtocol.Any, null);
+
+            Assert.Throws<ExceptionValidationError>(() =>
+                ks.EditException(e, "SSH", "0.0.0.0/0", null, ExceptionProtocol.Any, null, true));
+            Assert.Equal("203.0.113.5", fw.Find("KS-Exc-SSH").RemoteAddresses);
+        }
+
+        [Fact]
         public void ResetAll_RemovesRules_KeepsDefinitions()
         {
             var ks = Create();

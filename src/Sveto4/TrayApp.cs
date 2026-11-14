@@ -657,6 +657,14 @@ namespace Sveto4
             miExceptions.MenuItems.Add(new MenuItem("Add exception…", (s, e) => OnAddException()) { Enabled = !busy });
             if (state.Exceptions.Count > 0)
             {
+                var edit = new MenuItem("Edit exception");
+                foreach (var x in state.Exceptions)
+                {
+                    var entry = x.Entry;
+                    edit.MenuItems.Add(new MenuItem(entry.Name, (s, e) => OnEditException(entry)));
+                }
+                miExceptions.MenuItems.Add(edit);
+
                 var remove = new MenuItem("Remove exception");
                 foreach (var x in state.Exceptions)
                 {
@@ -701,6 +709,23 @@ namespace Sveto4
             Run("Add exception " + entry.Name,
                 () => ks.AddException(entry.Name, entry.Addresses, entry.Program, entry.Protocol, entry.Ports),
                 st => KillSwitch.PredictAddException(st, entry));
+        }
+
+        private void OnEditException(ExceptionEntry old)
+        {
+            if (busy) return;
+            var enabled = state.Exceptions.Any(x => x.Enabled && x.Entry.Name == old.Name);
+            ExceptionEntry entry;
+            using (var owner = DialogOwner())
+            using (var dialog = new ExceptionDialog(
+                       state.Exceptions.Select(x => x.Entry.Name).Where(n => n != old.Name).ToList(), old))
+            {
+                if (dialog.ShowDialog(owner) != DialogResult.OK) return;
+                entry = dialog.Result;
+            }
+            Run("Edit exception " + old.Name,
+                () => ks.EditException(old, entry.Name, entry.Addresses, entry.Program, entry.Protocol, entry.Ports, enabled),
+                st => KillSwitch.PredictEditException(st, old, entry, enabled));
         }
 
         private void OnRemoveException(ExceptionEntry entry)

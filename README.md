@@ -102,7 +102,7 @@ An exception allows traffic to specific addresses past the Kill Switch, through 
 | Protocol | no | Any, TCP or UDP |
 | Ports | no | Remote ports with TCP/UDP: `22`, `80,443`, `8000-8100`. Empty: any port |
 
-A new exception is enabled right away. Click it to turn it off or on; **Remove exception ▸** deletes it. A program that no longer exists is marked `⚠ Not found`. Exceptions are stored in `%ProgramData%\Sveto4\exceptions.json` (administrators only).
+A new exception is enabled right away. Click it to turn it off or on; **Edit exception ▸** opens the same window to change it (an enabled exception stays enabled); **Remove exception ▸** deletes it. A program that no longer exists is marked `⚠ Not found`. Exceptions are stored in `%ProgramData%\Sveto4\exceptions.json` (administrators only).
 
 ## Tooltip
 

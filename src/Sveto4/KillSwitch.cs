@@ -484,6 +484,14 @@ namespace Sveto4
             return PredictException(n, e, true);
         }
 
+        /// <summary>The edited exception keeps its place and its enabled state.</summary>
+        public static KsState PredictEditException(KsState s, ExceptionEntry old, ExceptionEntry updated, bool enabled)
+        {
+            var n = PredictException(s, old, false);
+            n.Exceptions = n.Exceptions.Select(x => SameName(x.Entry, old) ? new ExceptionStatus(updated, false) : x).ToList();
+            return enabled ? PredictException(n, updated, true) : n;
+        }
+
         public static KsState PredictRemoveException(KsState s, ExceptionEntry e)
         {
             var n = PredictException(s, e, false);
@@ -820,6 +828,27 @@ namespace Sveto4
             exceptionStore.Save(entries);
             SetExceptionEnabled(entry, true);
             Log.Info($"Added exception {entry.Name}: {Exceptions.Describe(entry)}" + (entry.Program != null ? ", " + entry.Program : ""));
+            return entry;
+        }
+
+        /// <summary>
+        /// Replaces a stored exception, keeping its place in the list. The rule of <paramref name="old"/> is removed;
+        /// the new one is created only if <paramref name="enabled"/>. Throws <see cref="ExceptionValidationError"/>.
+        /// </summary>
+        public ExceptionEntry EditException(ExceptionEntry old, string name, string addresses, string program,
+                                            ExceptionProtocol protocol, string ports, bool enabled)
+        {
+            if (exceptionStore == null) throw new ExceptionValidationError("Exceptions cannot be stored.");
+            var entries = exceptionStore.Load();
+            var index = entries.FindIndex(x => SameName(x, old));
+            if (index < 0) throw new ExceptionValidationError($"The exception \"{old.Name}\" no longer exists.");
+            var entry = Exceptions.Create(name, addresses, program, protocol, ports,
+                                          entries.Where((x, i) => i != index).Select(x => x.Name));
+            entries[index] = entry;
+            exceptionStore.Save(entries);
+            SetExceptionEnabled(old, false);
+            if (enabled) SetExceptionEnabled(entry, true);
+            Log.Info($"Edited exception {old.Name}: {entry.Name}, {Exceptions.Describe(entry)}" + (entry.Program != null ? ", " + entry.Program : ""));
             return entry;
         }
 

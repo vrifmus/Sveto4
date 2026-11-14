@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 namespace Sveto4
 {
-    /// <summary>"Add exception…" window. Validation errors are shown inside the window (a user action).</summary>
+    /// <summary>"Add exception…" / "Edit exception" window. Validation errors are shown inside the window (a user action).</summary>
     internal sealed class ExceptionDialog : Form
     {
         private readonly List<string> existingNames;
@@ -18,11 +18,13 @@ namespace Sveto4
 
         public ExceptionEntry Result { get; private set; }
 
-        public ExceptionDialog(List<string> existingNames)
+        /// <param name="existingNames">Names of the other exceptions (without the edited one).</param>
+        /// <param name="edit">The exception to edit, or null to add a new one.</param>
+        public ExceptionDialog(List<string> existingNames, ExceptionEntry edit = null)
         {
             this.existingNames = existingNames;
 
-            Text = "Add exception";
+            Text = edit == null ? "Add exception" : "Edit exception";
             Font = SystemFonts.MessageBoxFont;
             AutoScaleMode = AutoScaleMode.Dpi;
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -51,7 +53,16 @@ namespace Sveto4
             table.SetColumnSpan(error, 2);
             table.RowCount++;
 
-            var ok = new Button { Text = "Add", AutoSize = true, MinimumSize = new Size(80, 0) };
+            if (edit != null)
+            {
+                name.Text = edit.Name;
+                addresses.Text = edit.Addresses.Replace(",", ", ");
+                program.Text = edit.Program ?? "";
+                protocol.SelectedIndex = edit.Protocol == ExceptionProtocol.Tcp ? 1 : edit.Protocol == ExceptionProtocol.Udp ? 2 : 0;
+                ports.Text = edit.Ports ?? "";
+            }
+
+            var ok = new Button { Text = edit == null ? "Add" : "Save", AutoSize = true, MinimumSize = new Size(80, 0) };
             var cancel = new Button { Text = "Cancel", AutoSize = true, MinimumSize = new Size(80, 0), DialogResult = DialogResult.Cancel };
             ok.Click += (s, e) => Accept();
             var buttons = new FlowLayoutPanel

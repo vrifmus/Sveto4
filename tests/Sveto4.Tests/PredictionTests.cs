@@ -190,6 +190,19 @@ namespace Sveto4.Tests
             Check(() => ks.RemoveException(entry), s => KillSwitch.PredictRemoveException(s, entry));
         }
 
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void Exceptions_Edit(bool enabled)
+        {
+            var old = ks.AddException("SSH", "203.0.113.5", null, ExceptionProtocol.Tcp, "22");
+            ks.AddException("Other", "203.0.113.6", null, ExceptionProtocol.Any, null);
+            if (!enabled) ks.SetExceptionEnabled(old, false);
+            var updated = Exceptions.Create("VPS", "203.0.113.7", null, ExceptionProtocol.Tcp, "2222", new string[0]);
+            Check(() => ks.EditException(old, "VPS", "203.0.113.7", null, ExceptionProtocol.Tcp, "2222", enabled),
+                  s => KillSwitch.PredictEditException(s, old, updated, enabled));
+        }
+
         [Fact]
         public void Prediction_DoesNotModifyOriginal()
         {
