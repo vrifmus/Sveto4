@@ -57,6 +57,32 @@ namespace Sveto4
             new Autostart(new ComTaskScheduler(), Assembly.GetExecutingAssembly().Location,
                           WindowsIdentity.GetCurrent().Name, File.Exists);
 
+        public string ExePath => exePath;
+
+        /// <summary>Text after "Start with Windows" in the menu.</summary>
+        public static string MenuSuffix(AutostartStatus status, bool exeWritable) =>
+            status == AutostartStatus.OtherCopy ? "\tother copy"
+            : status == AutostartStatus.Broken ? "\t⚠ Not found"
+            : status == AutostartStatus.On && exeWritable ? "\t⚠ Writable folder"
+            : "";
+
+        /// <summary>
+        /// The exe, its folder or a folder above can be changed without administrator rights. Autostart runs
+        /// the exe elevated without a UAC prompt, so any program could then replace it and gain administrator rights.
+        /// </summary>
+        public static bool IsWritableByUsers(string exePath)
+        {
+            try
+            {
+                return !FolderSecurity.IsAdminOnlyFolder(Path.GetDirectoryName(exePath)) || !FolderSecurity.IsAdminOnlyItem(exePath);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "read permissions of " + exePath);
+                return true;
+            }
+        }
+
         public AutostartStatus GetStatus()
         {
             var xml = scheduler.GetTaskXml(TaskName);

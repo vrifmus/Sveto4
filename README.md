@@ -53,7 +53,7 @@ dotnet test        # unit tests, they never touch the real firewall
 - **Rules**: the app's firewall rules (prefix `KS-`), read-only.
 - **Reset ALL**: removes all `KS-*` rules (interfaces, profiles, LAN, WSL, exceptions) and disables profiles and exceptions; their definitions are kept. The Kill Switch stays as it is: if it is on, all traffic stays blocked. System leak blocking and autostart are not touched.
 - **Block system leaks**: while the Kill Switch is on, disables built-in Windows rules that let traffic bypass it (see [System leaks](#system-leaks)).
-- **Start with Windows**: a Task Scheduler task that starts the app at logon with highest privileges (no UAC prompt). If the exe is moved, the task follows it on the next start.
+- **Start with Windows**: a Task Scheduler task that starts the app at logon with highest privileges (no UAC prompt). If the exe is moved, the task follows it on the next start. If the exe is in a folder that programs without administrator rights can change, the item is marked `⚠ Writable folder` and turning it on asks for confirmation.
 - **Exit**: the Kill Switch **stays on** after exit or a crash. That is the point of a Kill Switch.
 
 ## VPN client profiles

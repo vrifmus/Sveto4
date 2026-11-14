@@ -47,6 +47,8 @@ namespace Sveto4
         private readonly Autostart autostart = Autostart.CreateDefault();
         private AutostartStatus autostartStatus = AutostartStatus.Unknown;
         private bool autostartBusy;
+        /// <summary>This exe can be replaced without administrator rights (see <see cref="Autostart.IsWritableByUsers"/>).</summary>
+        private bool exeWritable;
         private readonly System.Windows.Forms.Timer pollTimer = new System.Windows.Forms.Timer { Interval = PollIntervalMs };
         private readonly System.Windows.Forms.Timer animTimer = new System.Windows.Forms.Timer { Interval = 15 };
         private readonly Icons icons = new Icons();
@@ -333,6 +335,20 @@ namespace Sveto4
         private void OnAutostartClick()
         {
             var on = autostartStatus != AutostartStatus.On;
+            if (on && exeWritable)
+            {
+                using (var owner = DialogOwner())
+                {
+                    if (MessageBox.Show(owner,
+                            "Sveto4 is in a folder that programs without administrator rights can change:\n" +
+                            System.IO.Path.GetDirectoryName(autostart.ExePath) + "\n\n" +
+                            "Start with Windows runs it with administrator rights and no UAC prompt, so any program " +
+                            "could replace sveto4.exe and gain administrator rights at the next logon.\n\n" +
+                            @"Move sveto4.exe to a folder like C:\Program Files\Sveto4 first. Turn it on anyway?",
+                            "Sveto4", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                        return;
+                }
+            }
             UpdateAutostart(on ? (Action)autostart.Enable : autostart.Disable,
                             on ? AutostartStatus.On : AutostartStatus.Off,
                             "Start with Windows " + on);
@@ -361,6 +377,7 @@ namespace Sveto4
                         Log.Error(ex, what ?? "autostart");
                     }
                 });
+                exeWritable = await Task.Run(() => Autostart.IsWritableByUsers(autostart.ExePath));
                 autostartStatus = await Task.Run(() => autostart.GetStatus());
             }
             catch (Exception ex)
@@ -462,9 +479,7 @@ namespace Sveto4
 
             miAutostart.Checked = autostartStatus == AutostartStatus.On;
             miAutostart.Enabled = autostartStatus != AutostartStatus.Unknown;
-            miAutostart.Text = "Start with Windows" +
-                (autostartStatus == AutostartStatus.OtherCopy ? "\tother copy"
-                 : autostartStatus == AutostartStatus.Broken ? Warn + " Not found" : "");
+            miAutostart.Text = "Start with Windows" + Autostart.MenuSuffix(autostartStatus, exeWritable);
 
             BuildClientsMenu();
             BuildInterfacesMenu();

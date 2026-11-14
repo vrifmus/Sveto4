@@ -113,5 +113,14 @@ namespace Sveto4.Tests
             Assert.False(Create().RepairIfBroken());
             Assert.Empty(scheduler.Tasks);
         }
+
+        [Theory]
+        [InlineData(AutostartStatus.On, true, "\t⚠ Writable folder")]
+        [InlineData(AutostartStatus.On, false, "")]
+        [InlineData(AutostartStatus.Off, true, "")]       // nothing runs elevated yet
+        [InlineData(AutostartStatus.OtherCopy, true, "\tother copy")]
+        [InlineData(AutostartStatus.Broken, false, "\t⚠ Not found")]
+        public void MenuSuffix(object status, bool writable, string expected) =>
+            Assert.Equal(expected, Autostart.MenuSuffix((AutostartStatus)status, writable));
     }
 }
