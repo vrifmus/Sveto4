@@ -273,6 +273,22 @@ namespace Sveto4.Tests
         }
 
         [Fact]
+        public void Read_QueriesProcessesOnce_ForAllProfiles()
+        {
+            var calls = 0;
+            var profileStore = new FakeProfileStore();
+            profileStore.Files["a"] = "{\"id\":\"a\",\"name\":\"A\",\"adapterNamePrefixes\":[\"aaa\"],\"mainProcesses\":[\"a.exe\"]}";
+            profileStore.Files["b"] = "{\"id\":\"b\",\"name\":\"B\",\"adapterNamePrefixes\":[\"bbb\"],\"mainProcesses\":[\"b.exe\"]}";
+            var env = TestEnv.Create(() => { calls++; return processes; }, new string[0], adapters);
+            var ks = new KillSwitch(fw, env, store, profileStore: profileStore);
+
+            Read(ks);
+            Assert.Equal(1, calls); // Happ, A and B are not installed: each looks for a running process
+            Read(ks);
+            Assert.Equal(2, calls); // not cached between reads
+        }
+
+        [Fact]
         public void Disabled_NoSync()
         {
             var s = Read(Create());

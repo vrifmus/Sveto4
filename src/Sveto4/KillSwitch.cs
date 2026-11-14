@@ -729,20 +729,21 @@ namespace Sveto4
             s.OtherAllowRules = FindOtherAllowRules(all.Where(r => r.IsOutboundAllow && r.Enabled));
             s.DisabledLeaks = store.LoadDisabledRules();
             s.BlockLeaks = store.BlockSystemLeaks;
-            s.Clients = Profiles().Select(p => ReadClient(p, s.Rules, all)).ToList();
+            var readEnv = env.WithCachedProcesses();
+            s.Clients = Profiles().Select(p => ReadClient(p, s.Rules, all, readEnv)).ToList();
             s.Exceptions = LoadExceptions()
                 .Select(e => new ExceptionStatus(e, s.Rules.Any(r => r.Enabled &&
                     string.Equals(r.Name, ExceptionRuleName(e), StringComparison.OrdinalIgnoreCase))))
                 .ToList();
         }
 
-        private ClientStatus ReadClient(ClientProfile p, List<RuleInfo> ownRules, List<RuleProps> allRules)
+        private ClientStatus ReadClient(ClientProfile p, List<RuleInfo> ownRules, List<RuleProps> allRules, ClientEnvironment readEnv)
         {
             var enabled = IsClientEnabled(p, ownRules);
-            var dir = ClientProfiles.ResolveInstallDir(p, env);
+            var dir = ClientProfiles.ResolveInstallDir(p, readEnv);
             // An uninstalled client keeps its rules: they are removed when the profile is turned off.
             var stale = enabled && dir != null
-                        && !PlanAppRules(p, ClientProfiles.ExecutablesToAllow(p, dir, env), allRules).IsEmpty;
+                        && !PlanAppRules(p, ClientProfiles.ExecutablesToAllow(p, dir, readEnv), allRules).IsEmpty;
             return new ClientStatus(p, enabled, dir, store.GetClientAdapters(p.Id), stale);
         }
 

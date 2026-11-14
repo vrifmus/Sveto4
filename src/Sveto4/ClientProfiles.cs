@@ -96,6 +96,24 @@ namespace Sveto4
         public Func<string, bool> IsAdminOnlyFolder;
         /// <summary>The file or folder itself can be changed by administrators only; false if unreadable.</summary>
         public Func<string, bool> IsAdminOnlyItem;
+
+        /// <summary>
+        /// A copy whose process list is queried at most once (a WMI query takes tens of milliseconds):
+        /// one full read resolves the folder of every profile.
+        /// </summary>
+        public ClientEnvironment WithCachedProcesses()
+        {
+            var processes = new Lazy<List<ProcessEntry>>(() => Processes().ToList());
+            return new ClientEnvironment
+            {
+                Processes = () => processes.Value,
+                DirectoryExists = DirectoryExists,
+                ListExe = ListExe,
+                Adapters = Adapters,
+                IsAdminOnlyFolder = IsAdminOnlyFolder,
+                IsAdminOnlyItem = IsAdminOnlyItem,
+            };
+        }
     }
 
     /// <summary>Executable rule changes for a client: rules to add (name → exe path) and rule names to remove.</summary>
