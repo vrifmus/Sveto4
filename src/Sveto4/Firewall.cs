@@ -43,6 +43,8 @@ namespace Sveto4
         public bool IsOutboundAllow;
         public string ApplicationName;
         public string ServiceName;
+        /// <summary>Rule group; built-in Windows groups are resource references like "@FirewallAPI.dll,-23255".</summary>
+        public string Grouping;
         /// <summary>IANA protocol number: 6 = TCP, 17 = UDP, 41 = IPv6, 256 = any.</summary>
         public int Protocol;
         public string RemotePorts;
@@ -206,6 +208,7 @@ namespace Sveto4
             {
                 props.ApplicationName = rule.ApplicationName;
                 props.ServiceName = rule.ServiceName;
+                props.Grouping = rule.Grouping;
                 props.Protocol = (int)rule.Protocol;
                 props.RemotePorts = rule.RemotePorts;
             }

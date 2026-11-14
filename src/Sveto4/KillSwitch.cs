@@ -72,6 +72,23 @@ namespace Sveto4
         public string RuleName { get; }
     }
 
+    /// <summary>
+    /// Enabled outbound Allow rules added by programs (not built into Windows, not own): they let
+    /// their programs past the Kill Switch. Rules with the same name are shown once.
+    /// </summary>
+    internal sealed class OtherAllowRule
+    {
+        public OtherAllowRule(string name, IEnumerable<string> programs)
+        {
+            Name = name;
+            Programs = programs.ToList();
+        }
+
+        public string Name { get; }
+        /// <summary>Exe file names; empty when the rule is for any program (or for a Store app).</summary>
+        public List<string> Programs { get; }
+    }
+
     internal sealed class ProcessEntry
     {
         public uint Pid;
@@ -99,6 +116,8 @@ namespace Sveto4
         public List<LeakInfo> Leaks = new List<LeakInfo>();
         /// <summary>System rules disabled by the app while the Kill Switch is on.</summary>
         public List<LeakInfo> DisabledLeaks = new List<LeakInfo>();
+        /// <summary>Allow rules of other programs (see <see cref="OtherAllowRule"/>).</summary>
+        public List<OtherAllowRule> OtherAllowRules = new List<OtherAllowRule>();
         /// <summary>"Block system leaks" setting.</summary>
         public bool BlockLeaks = true;
         /// <summary>VPN client profiles and whether they are enabled.</summary>
@@ -127,6 +146,7 @@ namespace Sveto4
             Adapters = Adapters,
             Leaks = new List<LeakInfo>(Leaks),
             DisabledLeaks = new List<LeakInfo>(DisabledLeaks),
+            OtherAllowRules = OtherAllowRules,
             BlockLeaks = BlockLeaks,
             Clients = new List<ClientStatus>(Clients),
             Exceptions = new List<ExceptionStatus>(Exceptions),
@@ -139,6 +159,7 @@ namespace Sveto4
             Exceptions = other.Exceptions;
             Leaks = other.Leaks;
             DisabledLeaks = other.DisabledLeaks;
+            OtherAllowRules = other.OtherAllowRules;
             BlockLeaks = other.BlockLeaks;
             Rules = other.Rules;
             Interfaces = other.Interfaces;
@@ -573,6 +594,29 @@ namespace Sveto4
         }
 
         /// <summary>
+        /// Enabled outbound Allow rules that are neither own, nor built into Windows (group "@resource"),
+        /// nor a recognized system leak. Same-name rules are merged; sorted by name.
+        /// </summary>
+        public static List<OtherAllowRule> FindOtherAllowRules(IEnumerable<RuleProps> enabledOutboundAllow) =>
+            enabledOutboundAllow
+                .Where(r => r.Name != null && !r.Name.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
+                            && !(r.Grouping ?? "").StartsWith("@") && ClassifyLeak(r) == null)
+                .GroupBy(r => DisplayName(r), StringComparer.OrdinalIgnoreCase)
+                .Select(g => new OtherAllowRule(g.Key, g
+                    .Where(r => !string.IsNullOrEmpty(r.ApplicationName))
+                    .Select(r => Path.GetFileName(r.ApplicationName))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)))
+                .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        /// <summary>Store apps may have unresolved names like "ms-resource:…": show the exe instead.</summary>
+        private static string DisplayName(RuleProps r) =>
+            (r.Name.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase) || r.Name.StartsWith("@"))
+            && !string.IsNullOrEmpty(r.ApplicationName)
+                ? Path.GetFileName(r.ApplicationName)
+                : r.Name;
+
+        /// <summary>
         /// True when system rules must be disabled (Kill Switch on, blocking enabled, leaks open)
         /// or restored (Kill Switch off or blocking disabled, but some rules are still disabled by us).
         /// </summary>
@@ -662,6 +706,7 @@ namespace Sveto4
                              .ToList());
             s.WslAvailable = SafeHyperV(() => hyperV.IsWslAvailable(), false);
             s.Leaks = FindLeaks(all.Where(r => r.IsOutboundAllow && r.Enabled));
+            s.OtherAllowRules = FindOtherAllowRules(all.Where(r => r.IsOutboundAllow && r.Enabled));
             s.DisabledLeaks = store.LoadDisabledRules();
             s.BlockLeaks = store.BlockSystemLeaks;
             s.Clients = Profiles().Select(p => ReadClient(p, s.Rules, all)).ToList();

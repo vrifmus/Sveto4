@@ -35,6 +35,7 @@ namespace Sveto4
         private readonly MenuItem miToggle = new MenuItem("Turn ON");
         private readonly MenuItem miOff = new MenuItem("Turn OFF (all profiles)") { Visible = false };
         private readonly MenuItem miLeaks = new MenuItem { Visible = false };
+        private readonly MenuItem miOtherRules = new MenuItem { Visible = false };
         private readonly MenuItem miLan = new MenuItem("Allow LAN");
         private readonly MenuItem miWsl = new MenuItem("Allow WSL");
         private readonly MenuItem miBlockLeaks = new MenuItem("Block system leaks");
@@ -117,6 +118,7 @@ namespace Sveto4
                 new MenuItem("-"),
                 miBlockLeaks,
                 miLeaks,
+                miOtherRules,
                 new MenuItem("-"),
                 miAutostart,
                 new MenuItem("-"),
@@ -486,6 +488,30 @@ namespace Sveto4
             BuildExceptionsMenu();
             BuildRulesMenu();
             BuildLeaksMenu(on);
+            BuildOtherRulesMenu(on);
+        }
+
+        private const int MaxOtherRules = 40;
+
+        /// <summary>Read-only list of other programs' Allow rules, shown while the Kill Switch is on.</summary>
+        private void BuildOtherRulesMenu(bool on)
+        {
+            miOtherRules.MenuItems.Clear();
+            var rules = state.OtherAllowRules;
+            miOtherRules.Visible = on && rules.Count > 0;
+            if (!miOtherRules.Visible) return;
+
+            miOtherRules.Text = $"Other Allow rules ({rules.Count})";
+            foreach (var r in rules.Take(MaxOtherRules))
+            {
+                var programs = r.Programs.Count == 0 ? "" : "\t" + Shorten(string.Join(", ", r.Programs), 40);
+                miOtherRules.MenuItems.Add(new MenuItem(Shorten(r.Name, 50) + programs) { Enabled = false });
+            }
+            if (rules.Count > MaxOtherRules)
+                miOtherRules.MenuItems.Add(new MenuItem($"… and {rules.Count - MaxOtherRules} more") { Enabled = false });
+            miOtherRules.MenuItems.Add(new MenuItem("-"));
+            miOtherRules.MenuItems.Add(new MenuItem("Programs added these rules; they can reach the network outside the VPN.") { Enabled = false });
+            miOtherRules.MenuItems.Add(new MenuItem("Disable the ones you do not need in Windows Defender Firewall (wf.msc).") { Enabled = false });
         }
 
         private void BuildLeaksMenu(bool on)

@@ -78,7 +78,7 @@ namespace Sveto4.Tests
         private static RuleProps Copy(RuleProps r) => new RuleProps
         {
             Name = r.Name, Enabled = r.Enabled, IsOutboundAllow = true, ApplicationName = r.ApplicationName,
-            ServiceName = r.ServiceName, Protocol = r.Protocol, RemotePorts = r.RemotePorts,
+            ServiceName = r.ServiceName, Grouping = r.Grouping, Protocol = r.Protocol, RemotePorts = r.RemotePorts,
         };
     }
 

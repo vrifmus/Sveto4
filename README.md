@@ -53,6 +53,7 @@ dotnet test        # unit tests, they never touch the real firewall
 - **Rules**: the app's firewall rules (prefix `KS-`), read-only.
 - **Reset ALL**: removes all `KS-*` rules (interfaces, profiles, LAN, WSL, exceptions) and disables profiles and exceptions; their definitions are kept. The Kill Switch stays as it is: if it is on, all traffic stays blocked. System leak blocking and autostart are not touched.
 - **Block system leaks**: while the Kill Switch is on, disables built-in Windows rules that let traffic bypass it (see [System leaks](#system-leaks)).
+- **Other Allow rules (N)**: shown while the Kill Switch is on. Read-only list of enabled outbound Allow rules that programs added (not built into Windows, not the app's own). Each lets its program reach the network outside the VPN; disable the ones you do not need in Windows Defender Firewall (`wf.msc`).
 - **Start with Windows**: a Task Scheduler task that starts the app at logon with highest privileges (no UAC prompt). If the exe is moved, the task follows it on the next start. If the exe is in a folder that programs without administrator rights can change, the item is marked `⚠ Writable folder` and turning it on asks for confirmation.
 - **Exit**: the Kill Switch **stays on** after exit or a crash. That is the point of a Kill Switch.
 
@@ -143,7 +144,7 @@ Built-in Windows Allow rules still work while outbound traffic is blocked. The a
 - **Add profiles only with Import profile…, do not copy or move files into `%ProgramData%\Sveto4` by hand.** A file moved into a folder keeps the permissions of its old location, for example full access for your account on the Desktop. Until the permissions are fixed, any program running as you, without administrator rights, can rewrite it: add an exe to a profile or change the settings. Import reads the file and writes a new one with the folder's permissions. The app also checks every file before reading it and resets loose permissions (logged as `Permissions reset`), but it cannot tell whether the file was changed before that.
 - **Autostart runs the exe with administrator rights and no UAC prompt.** Keep the app in a folder only administrators can write to, such as `C:\Program Files\Sveto4\`. Otherwise any program could replace `sveto4.exe` and gain administrator rights at the next logon.
 - **The exe is not code-signed**, so SmartScreen may warn on first run. Release builds are produced by GitHub Actions from this repository's source.
-- Only the four system rules above are handled. Other built-in Allow rules (Store, Remote Assistance, etc.) stay active.
+- **Any enabled outbound Allow rule bypasses the Kill Switch**, because Windows Firewall applies it on every interface. Only the four system rules above are disabled automatically; other built-in Allow rules (Store, Remote Assistance, etc.) stay active, and rules added by programs are listed under **Other Allow rules** but not changed.
 - Client executable rules follow the client folder: when an update adds, removes or moves an exe, the rules are updated within about 30 seconds (logged as `executable rules: +[…] -[…]`). A client that was uninstalled keeps its rules until the profile is turned off.
 
 ## Errors and log
