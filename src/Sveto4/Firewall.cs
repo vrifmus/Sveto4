@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace Sveto4
 {
@@ -88,6 +90,8 @@ namespace Sveto4
     /// Late-bound wrapper over the Windows Firewall COM API (HNetCfg.FwPolicy2).
     /// COM "Name" of a rule is the same as DisplayName in PowerShell cmdlets,
     /// so rules created by the legacy script are recognized.
+    /// Every COM object is released explicitly: the managed heap barely grows, so the GC
+    /// would rarely run and the native memory behind unreleased objects would pile up.
     /// </summary>
     internal sealed class ComFirewall : IFirewall
     {
@@ -98,29 +102,33 @@ namespace Sveto4
         private const string RuleGroup = "Sveto4";
 
         public bool IsFirewallEnabled(int profile) =>
-            Convert.ToBoolean(GetIndexed(NewPolicy(), "FirewallEnabled", profile));
+            WithPolicy(policy => Convert.ToBoolean(GetIndexed(policy, "FirewallEnabled", profile)));
 
         public bool IsOutboundBlocked(int profile) =>
-            Convert.ToInt32(GetIndexed(NewPolicy(), "DefaultOutboundAction", profile)) == ActionBlock;
+            WithPolicy(policy => Convert.ToInt32(GetIndexed(policy, "DefaultOutboundAction", profile)) == ActionBlock);
 
         public void SetOutboundBlocked(int profile, bool block) =>
-            SetIndexed(NewPolicy(), "DefaultOutboundAction", profile, block ? ActionBlock : ActionAllow);
+            WithPolicy(policy =>
+            {
+                SetIndexed(policy, "DefaultOutboundAction", profile, block ? ActionBlock : ActionAllow);
+                return true;
+            });
 
         public List<RuleProps> GetAllRules()
         {
             var result = new List<RuleProps>();
-            dynamic policy = NewPolicy();
-            foreach (dynamic rule in policy.Rules)
-                result.Add(ToProps(rule));
+            WithRules(rules => ForEachRule(rules, rule => result.Add(ToProps(rule))));
             return result;
         }
 
-        public bool Exists(string name)
+        public bool Exists(string name) => WithRules(rules => Exists(rules, name));
+
+        private static bool Exists(object rules, string name)
         {
-            dynamic policy = NewPolicy();
+            object rule = null;
             try
             {
-                object rule = policy.Rules.Item(name);
+                rule = ((dynamic)rules).Item(name);
                 return rule != null;
             }
             catch (Exception)
@@ -128,80 +136,105 @@ namespace Sveto4
                 // Item() throws when the rule is not found.
                 return false;
             }
+            finally
+            {
+                Release(rule);
+            }
         }
 
-        public void SetEnabled(string name, bool enabled)
-        {
-            dynamic policy = NewPolicy();
-            foreach (dynamic rule in policy.Rules)
+        public void SetEnabled(string name, bool enabled) =>
+            WithRules(rules => ForEachRule(rules, rule =>
             {
-                string ruleName = rule.Name;
+                dynamic r = rule;
+                string ruleName = r.Name;
                 if (string.Equals(ruleName, name, StringComparison.OrdinalIgnoreCase))
-                    rule.Enabled = enabled;
-            }
-        }
+                    r.Enabled = enabled;
+            }));
 
-        public void RemoveWhere(Func<string, bool> match)
-        {
-            dynamic policy = NewPolicy();
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (dynamic rule in policy.Rules)
+        public void RemoveWhere(Func<string, bool> match) =>
+            WithRules(rules =>
             {
-                string name = rule.Name;
-                if (name != null && match(name)) names.Add(name);
-            }
-
-            foreach (var name in names)
-            {
-                // Remove() deletes one rule per call; repeat to catch duplicates.
-                for (var i = 0; i < 16 && Exists(name); i++)
+                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                ForEachRule(rules, rule =>
                 {
-                    try { policy.Rules.Remove(name); }
-                    catch (Exception ex) { Log.Error(ex, "remove rule " + name); break; }
+                    string name = ((dynamic)rule).Name;
+                    if (name != null && match(name)) names.Add(name);
+                });
+
+                foreach (var name in names)
+                {
+                    // Remove() deletes one rule per call; repeat to catch duplicates.
+                    for (var i = 0; i < 16 && Exists(rules, name); i++)
+                    {
+                        try { ((dynamic)rules).Remove(name); }
+                        catch (Exception ex) { Log.Error(ex, "remove rule " + name); break; }
+                    }
                 }
-            }
-        }
+            });
 
         public void AddOutboundAllow(RuleSpec spec)
         {
-            dynamic rule = Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FWRule", true));
-            rule.Name = spec.Name;
-            rule.Grouping = RuleGroup;
-            rule.Direction = DirectionOut;
-            rule.Action = ActionAllow;
-            rule.Profiles = ProfilesAll;
-            if (spec.Interface != null) rule.Interfaces = new object[] { spec.Interface };
-            if (spec.ApplicationName != null) rule.ApplicationName = spec.ApplicationName;
-            if (spec.RemoteAddresses != null) rule.RemoteAddresses = spec.RemoteAddresses;
-            // Ports can only be set after a protocol that has ports.
-            if (spec.Protocol != 256) rule.Protocol = spec.Protocol;
-            if (spec.RemotePorts != null) rule.RemotePorts = spec.RemotePorts;
-            rule.Enabled = spec.Enabled;
+            object com = Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FWRule", true));
+            try
+            {
+                dynamic rule = com;
+                rule.Name = spec.Name;
+                rule.Grouping = RuleGroup;
+                rule.Direction = DirectionOut;
+                rule.Action = ActionAllow;
+                rule.Profiles = ProfilesAll;
+                if (spec.Interface != null) rule.Interfaces = new object[] { spec.Interface };
+                if (spec.ApplicationName != null) rule.ApplicationName = spec.ApplicationName;
+                if (spec.RemoteAddresses != null) rule.RemoteAddresses = spec.RemoteAddresses;
+                // Ports can only be set after a protocol that has ports.
+                if (spec.Protocol != 256) rule.Protocol = spec.Protocol;
+                if (spec.RemotePorts != null) rule.RemotePorts = spec.RemotePorts;
+                rule.Enabled = spec.Enabled;
 
-            dynamic policy = NewPolicy();
-            policy.Rules.Add(rule);
+                WithRules(rules => { ((dynamic)rules).Add(com); });
+            }
+            finally
+            {
+                Release(com);
+            }
         }
 
         public List<RuleProps> SetOutboundAllowEnabledWhere(Func<RuleProps, bool> match, bool enabled,
                                                             Action<List<RuleProps>> beforeChange = null)
         {
-            var matches = new List<(dynamic Rule, RuleProps Props)>();
-            dynamic policy = NewPolicy();
-            foreach (dynamic rule in policy.Rules)
+            var matches = new List<(object Rule, RuleProps Props)>();
+            try
             {
-                RuleProps props = ToProps(rule);
-                if (props.IsOutboundAllow && match(props)) matches.Add((rule, props));
-            }
+                return WithRules(rules =>
+                {
+                    ForEachRuleKeeping(rules, rule =>
+                    {
+                        RuleProps props = ToProps(rule);
+                        if (!props.IsOutboundAllow || !match(props)) return false;
+                        matches.Add((rule, props)); // released in the outer finally
+                        return true;
+                    });
 
-            var changed = matches.Select(m => m.Props).ToList();
-            beforeChange?.Invoke(changed);
-            foreach (var m in matches) m.Rule.Enabled = enabled;
-            return changed;
+                    var changed = matches.Select(m => m.Props).ToList();
+                    beforeChange?.Invoke(changed);
+                    foreach (var m in matches) ((dynamic)m.Rule).Enabled = enabled;
+                    return changed;
+                });
+            }
+            finally
+            {
+                foreach (var m in matches) Release(m.Rule);
+            }
         }
 
         /// <summary>Reads rule properties; details only for outbound Allow rules (fewer COM calls).</summary>
-        private static RuleProps ToProps(dynamic rule)
+        /// <remarks>
+        /// Takes "object", not "dynamic": a call with a dynamic COM argument is bound anew every time,
+        /// about 20 times slower, and the binder keeps memory the GC never frees (~2 MB per full read).
+        /// </remarks>
+        private static RuleProps ToProps(object com)
         {
+            dynamic rule = com;
             var props = new RuleProps { Name = rule.Name, Enabled = (bool)rule.Enabled };
             props.IsOutboundAllow = (int)rule.Direction == DirectionOut && (int)rule.Action == ActionAllow;
             if (props.IsOutboundAllow)
@@ -215,8 +248,85 @@ namespace Sveto4
             return props;
         }
 
-        private static object NewPolicy() =>
-            Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FwPolicy2", true));
+        /// <summary>Runs <paramref name="use"/> with a new policy object and releases it afterwards.</summary>
+        private static T WithPolicy<T>(Func<object, T> use)
+        {
+            object policy = Activator.CreateInstance(Type.GetTypeFromProgID("HNetCfg.FwPolicy2", true));
+            try
+            {
+                return use(policy);
+            }
+            finally
+            {
+                Release(policy);
+            }
+        }
+
+        /// <summary>Runs <paramref name="use"/> with the rule collection of a new policy object.</summary>
+        private static T WithRules<T>(Func<object, T> use) =>
+            WithPolicy(policy =>
+            {
+                object rules = ((dynamic)policy).Rules;
+                try
+                {
+                    return use(rules);
+                }
+                finally
+                {
+                    Release(rules);
+                }
+            });
+
+        private static void WithRules(Action<object> use) =>
+            WithRules(rules =>
+            {
+                use(rules);
+                return true;
+            });
+
+        /// <summary>Calls <paramref name="visit"/> for every rule and releases each rule right after.</summary>
+        /// <remarks>The rule is passed as "object" for the reason given at <see cref="ToProps"/>.</remarks>
+        private static void ForEachRule(object rules, Action<object> visit) =>
+            ForEachRuleKeeping(rules, rule =>
+            {
+                visit(rule);
+                return false;
+            });
+
+        /// <summary>
+        /// Calls <paramref name="visit"/> for every rule. A rule is released right after the call
+        /// unless <paramref name="visit"/> returns true: then the caller owns and releases it.
+        /// </summary>
+        private static void ForEachRuleKeeping(object rules, Func<object, bool> visit)
+        {
+            var enumerator = ((IEnumerable)rules).GetEnumerator();
+            try
+            {
+                while (enumerator.MoveNext())
+                {
+                    object rule = enumerator.Current;
+                    var kept = false;
+                    try
+                    {
+                        kept = visit(rule);
+                    }
+                    finally
+                    {
+                        if (!kept) Release(rule);
+                    }
+                }
+            }
+            finally
+            {
+                // The managed enumerator wraps a COM IEnumVARIANT.
+                if (enumerator is ICustomAdapter adapter) Release(adapter.GetUnderlyingObject());
+            }
+        }
+
+        private static void Release(object com)
+        {
+            if (com != null && Marshal.IsComObject(com)) Marshal.FinalReleaseComObject(com);
+        }
 
         // Parameterized COM properties (indexed by profile) are not reachable via "dynamic".
         private static object GetIndexed(object com, string property, int profile) =>
